@@ -30,7 +30,7 @@
   const branch = $derived(repo.status?.branch ?? null);
   const undoTop = $derived(repo.undoStack.at(-1));
   const redoTop = $derived(repo.redoStack.at(-1));
-  const busy = $derived(!!repo.op);
+  const busy = $derived(!!repo.op || !!app.confirmation);
 </script>
 
 <div class="toolbar">

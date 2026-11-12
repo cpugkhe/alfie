@@ -13,6 +13,7 @@ import {
 import { clamp } from '$lib/util';
 import { explain } from '$lib/explain';
 import { RepoState } from './repo.svelte';
+import { createConfirmation, type Confirmation, type ConfirmationOptions } from '$lib/confirmation';
 
 export interface Toast {
   id: number;
@@ -27,11 +28,9 @@ export interface Toast {
 }
 
 export interface Dialog {
-  kind: 'confirm' | 'prompt';
   title: string;
   body?: string;
   confirmLabel: string;
-  danger?: boolean;
   value: string;
   placeholder?: string;
   resolve: (result: string | null) => void;
@@ -89,6 +88,7 @@ class App {
   profiles = $state<ProfileStore>({ profiles: [], bindings: {} });
   profilesOpen = $state(false);
   dialog = $state<Dialog | null>(null);
+  confirmation = $state.raw<Confirmation | null>(null);
   spacesOpen = $state(false);
   drag = $state<TabDrag | null>(null);
   logOpen = $state(false);
@@ -143,19 +143,26 @@ class App {
     return this.space.mru;
   }
 
-  // ---------- dialogs ----------
+  // ---------- confirmations and prompts ----------
 
   /** Asks before something destructive. Resolves true when confirmed. */
-  confirm(opts: { title: string; body?: string; confirmLabel?: string; danger?: boolean }): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.dialog = {
-        kind: 'confirm',
-        value: '',
-        confirmLabel: 'OK',
-        ...opts,
-        resolve: (r) => resolve(r !== null),
-      };
-    });
+  confirm(opts: ConfirmationOptions, repo = this.active): Promise<boolean> {
+    this.answerConfirmation(this.confirmation, false);
+    this.closeDialog(null);
+    this.palette = null;
+    this.menu = null;
+    this.spacesOpen = false;
+    this.profilesOpen = false;
+    this.helpOpen = false;
+    const request = createConfirmation(opts, repo?.path ?? null);
+    this.confirmation = request;
+    return request.result;
+  }
+
+  answerConfirmation(request: Confirmation | null, confirmed: boolean) {
+    if (!request || this.confirmation !== request) return;
+    this.confirmation = null;
+    request.resolve(confirmed);
   }
 
   /** Asks for one line of text. Resolves null when cancelled. */
@@ -166,8 +173,10 @@ class App {
     value?: string;
     confirmLabel?: string;
   }): Promise<string | null> {
+    this.answerConfirmation(this.confirmation, false);
     return new Promise((resolve) => {
-      this.dialog = { kind: 'prompt', value: '', confirmLabel: 'OK', ...opts, resolve };
+      this.closeDialog(null);
+      this.dialog = { value: '', confirmLabel: 'OK', ...opts, resolve };
     });
   }
 
@@ -184,6 +193,7 @@ class App {
     if (!tab) {
       tab = new RepoState(path, name);
       tab.notify = (text, kind, context) => this.toast(text, kind, context);
+      tab.canWrite = () => this.confirmation === null;
       tab.sections = this.sections;
       tab.prefs = this.prefs;
       if (!this.repoLocal[path]) this.repoLocal[path] = { favorites: [], bases: {} };

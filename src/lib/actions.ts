@@ -54,7 +54,7 @@ export async function discardFile(repo: RepoState) {
     body: parts.filter(Boolean).join(' '),
     confirmLabel: one ? 'Discard' : `Discard ${list.length} files`,
     danger: true,
-  });
+  }, repo);
   if (!ok) return;
   await repo.run('Discarding…', () => api.discard(p(repo), tracked, untracked));
   repo.clearMarks();
@@ -136,7 +136,7 @@ export async function hunkAction(repo: RepoState, action: HunkAction) {
       body: `The change will be removed from ${open.entry.path} on disk. This cannot be undone.`,
       confirmLabel: 'Discard',
       danger: true,
-    });
+    }, repo);
     if (!ok) return;
   }
   const hunk = repo.hunkIdx;
@@ -185,7 +185,7 @@ export async function commit(repo: RepoState, thenPush = false) {
       title: 'Nothing is staged',
       body: `Stage all ${files.length} changed ${files.length === 1 ? 'file' : 'files'} and commit them?`,
       confirmLabel: 'Stage all and commit',
-    });
+    }, repo);
     if (!stageFirst) return;
   }
   const amend = repo.amend;
@@ -220,18 +220,24 @@ export async function commit(repo: RepoState, thenPush = false) {
 export async function checkoutRef(repo: RepoState, ref: Pick<Ref, 'short' | 'kind'>) {
   let cancelled = false;
   let approved: string | null = null;
-  const go = async () => {
-    if (ref.kind !== 'remote') return api.checkout(p(repo), ref.short, ref.kind);
-    const ahead = await api.checkoutRemote(p(repo), ref.short, approved);
-    if (!ahead) return;
+  const confirmReset = async (tip: string) => {
     const ok = await app.confirm({
       title: `Reset local branch to ${ref.short}?`,
-      body: `The local branch has commits missing from ${ref.short}. Resetting removes those commits from the branch and matches the latest remote commit. Uncommitted changes are kept; conflicting changes must be stashed first.`,
+      body: `Local commits missing from ${ref.short} will leave this branch. Uncommitted changes are kept; conflicting changes must be stashed first.`,
       confirmLabel: 'Reset to remote',
       danger: true,
-    });
-    if (!ok) { cancelled = true; return; }
-    approved = ahead;
+    }, repo);
+    cancelled = !ok;
+    if (ok) approved = tip;
+    return ok;
+  };
+  const go = async () => {
+    if (ref.kind !== 'remote') return api.checkout(p(repo), ref.short, ref.kind);
+    // Cached divergence can ask immediately; Git still fetches and verifies the approved tip.
+    const local = repo.refs.find((r) => r.kind === 'local' && ref.short === `origin/${r.short}` && r.upstream === ref.short && r.ahead > 0);
+    if (!approved && local && !(await confirmReset(local.target))) return;
+    const ahead = await api.checkoutRemote(p(repo), ref.short, approved);
+    if (!ahead || !(await confirmReset(ahead))) return;
     const changed = await api.checkoutRemote(p(repo), ref.short, ahead);
     if (changed) throw new Error('The local branch changed while confirming. Try again to review the reset.');
   };
@@ -251,7 +257,7 @@ export async function checkoutRef(repo: RepoState, ref: Pick<Ref, 'short' | 'kin
     title: 'Local changes are in the way',
     body: `Switching to ${ref.short} would overwrite uncommitted changes. Stash them and switch? They stay in the stash list until you apply them.`,
     confirmLabel: 'Stash and switch',
-  });
+  }, repo);
   if (!ok) return;
   const failed = await repo.run(
     `Checking out ${ref.short}…`,
@@ -305,7 +311,7 @@ export async function deleteBranch(repo: RepoState, ref: Ref) {
       body: 'Removes the branch from the remote for everyone. Your local branch is kept.',
       confirmLabel: 'Delete remote branch',
       danger: true,
-    });
+    }, repo);
     if (ok) await repo.run('Deleting remote branch…', () => api.deleteRemoteBranch(p(repo), ref.short));
     return;
   }
@@ -317,7 +323,7 @@ export async function deleteBranch(repo: RepoState, ref: Ref) {
     title: `Delete branch ${ref.short}?`,
     confirmLabel: 'Delete',
     danger: true,
-  });
+  }, repo);
   if (!ok) return;
   const err = await repo.run('Deleting…', () => api.deleteBranch(p(repo), ref.short, false), {
     quiet: true,
@@ -332,7 +338,7 @@ export async function deleteBranch(repo: RepoState, ref: Ref) {
     body: 'Commits that exist only on this branch will become unreachable. Delete it anyway?',
     confirmLabel: 'Delete anyway',
     danger: true,
-  });
+  }, repo);
   if (force) await repo.run('Deleting…', () => api.deleteBranch(p(repo), ref.short, true));
 }
 
@@ -437,7 +443,7 @@ export async function dropStash(repo: RepoState, stash: Stash) {
     body: `"${stash.message}" will be deleted. This cannot be undone.`,
     confirmLabel: 'Drop',
     danger: true,
-  });
+  }, repo);
   if (ok) await repo.run('Dropping stash…', () => api.stashAction(p(repo), stash.name, 'drop'));
 }
 
@@ -547,7 +553,7 @@ export async function rebaseOnto(repo: RepoState, name: string) {
       `Commits on ${branch} that are not in ${name} are re-created on top of it.` +
       (pushed ? ' This branch has an upstream: afterwards it will need a force push.' : ''),
     confirmLabel: 'Rebase',
-  });
+  }, repo);
   if (ok) await moveBranch(repo, `Rebasing onto ${name}…`, `rebase onto ${name}`, () => api.rebase(p(repo), name));
 }
 
@@ -571,7 +577,7 @@ export async function resetTo(repo: RepoState, sha: string, mode: 'soft' | 'mixe
         `Commits after ${short(sha)} leave the branch (Undo can bring those back, not the uncommitted changes).`,
       confirmLabel: 'Hard reset',
       danger: true,
-    });
+    }, repo);
     if (!ok) return;
   }
   const before = repo.head;
@@ -596,7 +602,7 @@ export async function sequence(repo: RepoState, action: 'continue' | 'skip' | 'a
       body: 'The branch goes back to where it was before it started. Conflict fixes made so far are dropped.',
       confirmLabel: `Abort ${kind}`,
       danger: true,
-    });
+    }, repo);
     if (!ok) return;
   }
   const err = await repo.run(`${action === 'abort' ? 'Aborting' : action === 'skip' ? 'Skipping' : 'Continuing'} ${kind}…`, () =>
@@ -626,7 +632,7 @@ export async function deleteTag(repo: RepoState, name: string) {
     body: 'Removes the local tag only. A copy already pushed stays on the remote.',
     confirmLabel: 'Delete',
     danger: true,
-  });
+  }, repo);
   if (ok) await repo.run('Deleting tag…', () => api.deleteTag(p(repo), name));
 }
 
@@ -636,7 +642,7 @@ export async function deleteRemoteTag(repo: RepoState, name: string) {
     body: 'Removes it for everyone who fetches from the remote. Your local tag stays. Releases built from this tag may break.',
     confirmLabel: 'Delete on remote',
     danger: true,
-  });
+  }, repo);
   if (ok) {
     await repo.run(`Deleting remote tag ${name}…`, () => api.deleteRemoteTag(p(repo), name), {
       done: `Tag ${name} removed from remote`,
@@ -702,7 +708,7 @@ export async function forcePush(repo: RepoState) {
     body: 'Uses --force-with-lease: the remote branch is replaced only if nobody pushed to it since your last fetch.',
     confirmLabel: 'Force push',
     danger: true,
-  });
+  }, repo);
   if (ok) await repo.run('Force pushing…', () => api.push(p(repo), true), { done: 'Pushed' });
 }
 

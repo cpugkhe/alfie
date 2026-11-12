@@ -14,6 +14,7 @@
   import SpaceSwitcher from '$lib/components/SpaceSwitcher.svelte';
   import ProfilesPanel from '$lib/components/ProfilesPanel.svelte';
   import ContextMenu from '$lib/components/ContextMenu.svelte';
+  import ConfirmationBar from '$lib/components/ConfirmationBar.svelte';
 
   onMount(() => {
     const start = async () => {
@@ -42,7 +43,7 @@
       commands: () => commands,
       scopes: activeScopes,
       overlayOpen: () => app.palette !== null || app.helpOpen,
-      blocked: () => app.dialog !== null || app.spacesOpen || app.profilesOpen,
+      blocked: () => app.dialog !== null || app.confirmation !== null || app.spacesOpen || app.profilesOpen,
     });
     return () => {
       removeKeymap();
@@ -51,11 +52,21 @@
   });
 
   const split = $derived(app.secondary ? app.space.split : null);
+
+  $effect(() => {
+    const request = app.confirmation;
+    if (!request) return;
+    const visible = request.repo === null
+      ? !app.primary
+      : [app.primary, app.secondary].some((repo) => repo?.path === request.repo);
+    if (!visible || app.dialog || app.palette || app.spacesOpen || app.profilesOpen || app.helpOpen) app.answerConfirmation(request, false);
+  });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="app" oncontextmenu={(e) => e.preventDefault()}>
   <TabBar />
+  {#if !app.primary}<ConfirmationBar />{/if}
   <div class="panes" class:column={split?.dir === 'column'}>
     <div
       class="pane"

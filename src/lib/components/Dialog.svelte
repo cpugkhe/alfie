@@ -2,7 +2,6 @@
   import { app } from '$lib/state/app.svelte';
 
   let inputEl = $state<HTMLInputElement>();
-  let okEl = $state<HTMLButtonElement>();
   let value = $state('');
 
   const d = $derived(app.dialog);
@@ -12,16 +11,12 @@
     value = d.value;
     // Focus after the element exists; select prefilled text for quick replace.
     queueMicrotask(() => {
-      if (d.kind === 'prompt') {
-        inputEl?.focus();
-        inputEl?.select();
-      } else {
-        okEl?.focus();
-      }
+      inputEl?.focus();
+      inputEl?.select();
     });
   });
 
-  const submit = () => app.closeDialog(d?.kind === 'prompt' ? value : '');
+  const submit = () => app.closeDialog(value);
   const cancel = () => app.closeDialog(null);
 
   function onKey(e: KeyboardEvent) {
@@ -41,12 +36,10 @@
     <div class="dialog" role="dialog" aria-modal="true" tabindex="-1" onmousedown={(e) => e.stopPropagation()}>
       <div class="title">{d.title}</div>
       {#if d.body}<div class="body">{d.body}</div>{/if}
-      {#if d.kind === 'prompt'}
-        <input bind:this={inputEl} bind:value placeholder={d.placeholder} spellcheck="false" autocomplete="off" />
-      {/if}
+      <input bind:this={inputEl} bind:value placeholder={d.placeholder} spellcheck="false" autocomplete="off" />
       <div class="buttons">
         <button onclick={cancel}>Cancel <kbd>esc</kbd></button>
-        <button bind:this={okEl} class="ok" class:danger={d.danger} onclick={submit}>
+        <button class="ok" onclick={submit}>
           {d.confirmLabel} <kbd>↵</kbd>
         </button>
       </div>
@@ -125,13 +118,6 @@
   }
   .ok:hover {
     background: var(--accent-hover);
-  }
-  .ok.danger {
-    background: var(--red);
-    border-color: var(--red);
-  }
-  .ok.danger:hover {
-    background: var(--red-hover);
   }
   .ok:focus-visible {
     box-shadow: 0 0 0 2px var(--raised), 0 0 0 4px currentColor;

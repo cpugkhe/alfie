@@ -528,6 +528,20 @@ fn remote_checkout_requires_approval_for_ahead_and_diverged_branches() {
 }
 
 #[test]
+fn approved_remote_checkout_still_fetches_the_latest_remote_commit() {
+    let (origin, r) = with_origin();
+    r.write("local.txt", "local\n");
+    r.commit_all("local only");
+    let approved = log::head_oid(r.path()).unwrap();
+    origin.write("remote.txt", "latest\n");
+    origin.commit_all("remote only");
+
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", Some(&approved)).unwrap(), None);
+    assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
+    assert_eq!(r.read("remote.txt"), "latest\n");
+}
+
+#[test]
 fn remote_checkout_protects_conflicting_uncommitted_work() {
     let (origin, r) = with_origin();
     origin.write("a.txt", "remote\n");

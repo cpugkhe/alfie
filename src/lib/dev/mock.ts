@@ -51,6 +51,8 @@ function press(combo: string) {
 
 export function install() {
   const f = fixture as any;
+  const confirmationDemo = location.hash.includes('demoConfirmation');
+  const demoLocal = f.refs.refs.find((r: any) => r.short === 'hotfix/crash');
   const handlers: Record<string, (args: any) => unknown> = {
     session_load: () => ({
       spaces: [
@@ -75,7 +77,12 @@ export function install() {
             : r.short === 'hotfix/crash'
               ? { ...r, upstream: 'origin/hotfix/crash', ahead: 1 }
               : r,
-      ),
+      ).concat(confirmationDemo && demoLocal ? [{
+        ...demoLocal,
+        kind: 'remote', name: 'refs/remotes/origin/hotfix/crash', short: 'origin/hotfix/crash',
+        target: f.log.commits.find((c: any) => c.id === demoLocal.target)?.parents[0] ?? demoLocal.target,
+        upstream: null, ahead: 0, behind: 0,
+      }] : []),
     }),
     repo_log: ({ branch, scope, limit }) => {
       if (!branch && scope !== 'current') return f.log;
@@ -128,6 +135,12 @@ export function install() {
         'checkout_remote', 'push_branch', 'delete_remote_branch',
       ].map((cmd) => [cmd, () => null]),
     ),
+    ...(confirmationDemo ? {
+      checkout_remote: ({ expected }: { expected: string | null }) => {
+        if (expected !== demoLocal?.target) throw new Error('Reset was attempted without approval.');
+        return null;
+      },
+    } : {}),
     'plugin:event|listen': () => 1,
   };
 

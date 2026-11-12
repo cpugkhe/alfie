@@ -41,7 +41,7 @@ export function menuAction(id: string) {
     return;
   }
   const r = app.active;
-  if (!r || app.dialog) return;
+  if (!r || app.dialog || app.confirmation) return;
   if (id === 'undo') act.undo(r);
   else if (id === 'redo') act.redo(r);
 }

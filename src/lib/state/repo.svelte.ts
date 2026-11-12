@@ -145,6 +145,7 @@ export class RepoState {
   collapsedDirs = $state<string[]>([]);
   /** Set by the app so this class needs no import of it. */
   notify: (text: string, kind?: 'info' | 'error', context?: string) => void = () => {};
+  canWrite: () => boolean = () => true;
 
   commitMsg = $state('');
   amend = $state(false);
@@ -483,6 +484,10 @@ export class RepoState {
     fn: () => Promise<unknown>,
     opts: { done?: string; quiet?: boolean } = {},
   ): Promise<string | null> {
+    if (!this.canWrite()) {
+      this.notify('Confirm or cancel the pending action first.', 'error');
+      return 'confirmation pending';
+    }
     if (this.op) {
       this.notify(`Still busy: ${this.op}`, 'error');
       return 'busy';

@@ -7,6 +7,7 @@
   import Detail from './Detail.svelte';
   import DiffView from './DiffView.svelte';
   import Toolbar from './Toolbar.svelte';
+  import ConfirmationBar from './ConfirmationBar.svelte';
   import { sequence } from '$lib/actions';
 
   const SEQ = { merge: 'Merge', rebase: 'Rebase', 'cherry-pick': 'Cherry-pick', revert: 'Revert' };
@@ -44,6 +45,7 @@
 
 <div class="wrap" bind:clientWidth={width}>
 <Toolbar {repo} />
+<ConfirmationBar {repo} />
 {#if repo.status?.state}
   {@const kind = repo.status.state}
   {@const conflicts = repo.status.files.filter((f) => f.conflicted).length}
@@ -138,6 +140,7 @@
     color: var(--red);
   }
   .wrap {
+    container-type: inline-size;
     flex: 1;
     display: flex;
     flex-direction: column;

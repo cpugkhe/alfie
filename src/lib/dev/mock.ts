@@ -52,7 +52,9 @@ function press(combo: string) {
 export function install() {
   const f = fixture as any;
   const confirmationDemo = location.hash.includes('demoConfirmation');
+  const originDemo = location.hash.includes('demoOrigin');
   const demoLocal = f.refs.refs.find((r: any) => r.short === 'hotfix/crash');
+  const demoCurrent = f.refs.refs.find((r: any) => r.kind === 'local' && r.short === f.status.branch);
   const handlers: Record<string, (args: any) => unknown> = {
     session_load: () => ({
       spaces: [
@@ -70,7 +72,9 @@ export function install() {
     repo_refs: () => ({
       ...f.refs,
       refs: f.refs.refs.map((r: any) =>
-        r.short === 'main'
+        originDemo && r === demoCurrent
+          ? { ...r, upstream: `origin/${r.short}` }
+          : r.short === 'main'
           ? { ...r, upstream: 'origin/main' }
           : r.short === 'feature/login'
             ? { ...r, upstream: 'origin/feature/login', behind: 2 }
@@ -81,6 +85,10 @@ export function install() {
         ...demoLocal,
         kind: 'remote', name: 'refs/remotes/origin/hotfix/crash', short: 'origin/hotfix/crash',
         target: f.log.commits.find((c: any) => c.id === demoLocal.target)?.parents[0] ?? demoLocal.target,
+        upstream: null, ahead: 0, behind: 0,
+      }] : []).concat(originDemo && demoCurrent ? [{
+        ...demoCurrent,
+        kind: 'remote', name: `refs/remotes/origin/${demoCurrent.short}`, short: `origin/${demoCurrent.short}`,
         upstream: null, ahead: 0, behind: 0,
       }] : []),
     }),

@@ -424,6 +424,7 @@ pub fn create_branch(
     start: Option<&str>,
     checkout: bool,
 ) -> Result<(), String> {
+    git(repo, &["check-ref-format", "--branch", name])?;
     let mut cmd = if checkout {
         w(repo).args(["checkout", "-q", "-b", name])
     } else {
@@ -444,7 +445,8 @@ pub fn delete_branch(repo: &str, name: &str, force: bool) -> Result<(), String> 
 }
 
 pub fn rename_branch(repo: &str, old: &str, new: &str) -> Result<(), String> {
-    done(w(repo).args(["branch", "-m", old, new]).run())
+    git(repo, &["check-ref-format", "--branch", new])?;
+    done(w(repo).args(["branch", "-m", "--", old, new]).run())
 }
 
 // ---------- stash ----------

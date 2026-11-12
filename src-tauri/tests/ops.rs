@@ -57,6 +57,24 @@ fn s(v: &str) -> Vec<String> {
 }
 
 #[test]
+fn invalid_branch_names_cannot_become_git_options() {
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.commit_all("base");
+    r.sh(&["branch", "feature"]);
+    r.write("a.txt", "main\n");
+    r.commit_all("main");
+    let before = r.sh(&["show-ref", "--heads"]);
+    for name in ["--force", "-D", "bad name"] {
+        assert!(ops::rename_branch(r.path(), "feature", name).is_err());
+        assert!(ops::create_branch(r.path(), name, Some("feature"), false).is_err());
+        assert!(ops::create_branch(r.path(), name, None, true).is_err());
+        assert_eq!(r.sh(&["show-ref", "--heads"]), before);
+        assert_eq!(r.sh(&["branch", "--show-current"]).trim(), "main");
+    }
+}
+
+#[test]
 fn stage_unstage_commit_amend() {
     let r = Repo::new();
     r.write("a.txt", "one\n");

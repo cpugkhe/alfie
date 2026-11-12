@@ -265,7 +265,16 @@
                         checkoutRef(repo, b.ref);
                       }}
                     >
-                      <span class="truncate">{b.label}</span>{#if b.synced}<span class="sync">⇄</span>{/if}
+                      <span class="truncate">{b.label}</span>
+                      {#if b.origin}
+                        <span class="origin-avatar" title="origin: {repo.origin?.owner ?? 'remote'}{b.synced ? ' — in sync' : ''}">
+                          {#if repo.avatar}
+                            <img src={repo.avatar} alt="{repo.origin?.owner ?? 'Repository owner'} profile" referrerpolicy="no-referrer" onerror={() => (repo.avatar = null)} />
+                          {:else}
+                            <span aria-label="Origin repository owner">{(repo.origin?.owner ?? 'origin').slice(0, 1).toUpperCase()}</span>
+                          {/if}
+                        </span>
+                      {:else if b.synced}<span class="sync">⇄</span>{/if}
                     </span>
                   {/each}
                   {#if badges.length > MAX_BADGES}
@@ -633,6 +642,23 @@
     opacity: 0.6;
     font-size: 10px;
   }
+  .origin-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex: none;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--raised);
+    color: var(--text-dim);
+    font-size: 9px;
+    line-height: 1;
+    outline: 1px solid oklch(1 0 0 / 0.1);
+    outline-offset: -1px;
+  }
+  .origin-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .empty {
     position: absolute;
     inset: 24px 0 0;

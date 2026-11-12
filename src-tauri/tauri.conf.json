@@ -23,7 +23,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src ipc: http://ipc.localhost https://gitlab.com https://api.bitbucket.org; object-src 'none'; base-uri 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src ipc: http://ipc.localhost https://gitlab.com https://api.bitbucket.org ws://localhost:1420 ws://127.0.0.1:1420 ws://localhost:1421 ws://127.0.0.1:1421; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {

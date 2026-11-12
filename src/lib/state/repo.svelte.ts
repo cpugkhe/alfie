@@ -63,6 +63,7 @@ export interface Badge {
   kind: 'head' | 'local' | 'remote' | 'tag';
   /** Local branch and its upstream point at the same commit. */
   synced: boolean;
+  origin: boolean;
   /** Branch this badge stands for; absent for tags and detached HEAD. */
   ref?: { short: string; kind: 'local' | 'remote' };
 }
@@ -117,6 +118,11 @@ export class RepoState {
 
   /** `host:owner/repo` of origin, if any. */
   remote = $state<string | null>(null);
+  avatar = $state<string | null>(null);
+  origin = $derived.by(() => {
+    const match = this.remote?.match(/^([^:]+):(.+)$/);
+    return match ? { host: match[1], owner: match[2].split('/')[0], path: match[2] } : null;
+  });
   undoStack = $state<UndoEntry[]>([]);
   redoStack = $state<UndoEntry[]>([]);
   /** Keys of files picked with shift/⌘ click in the changes list. */
@@ -219,18 +225,19 @@ export class RepoState {
         label: r.short,
         kind: r.short === current ? 'head' : 'local',
         synced,
+        origin: synced && !!up?.short.startsWith('origin/'),
         ref: { short: r.short, kind: 'local' },
       });
     }
     for (const r of this.refs) {
       if (r.kind === 'remote' && !absorbed.has(r.short)) {
-        add(r.target, { label: r.short, kind: 'remote', synced: false, ref: { short: r.short, kind: 'remote' } });
+        add(r.target, { label: r.short, kind: 'remote', synced: false, origin: r.short.startsWith('origin/'), ref: { short: r.short, kind: 'remote' } });
       } else if (r.kind === 'tag') {
-        add(r.target, { label: r.short, kind: 'tag', synced: false });
+        add(r.target, { label: r.short, kind: 'tag', synced: false, origin: false });
       }
     }
     if (!current && this.head) {
-      add(this.head, { label: 'HEAD', kind: 'head', synced: false });
+      add(this.head, { label: 'HEAD', kind: 'head', synced: false, origin: false });
     }
     const order = { head: 0, local: 1, remote: 2, tag: 3 };
     for (const list of map.values()) list.sort((a, b) => order[a.kind] - order[b.kind]);

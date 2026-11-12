@@ -9,10 +9,24 @@
   import Toolbar from './Toolbar.svelte';
   import ConfirmationBar from './ConfirmationBar.svelte';
   import { sequence } from '$lib/actions';
+  import { ownerAvatar } from '$lib/remote';
 
   const SEQ = { merge: 'Merge', rebase: 'Rebase', 'cherry-pick': 'Cherry-pick', revert: 'Revert' };
 
   let { repo }: { repo: RepoState } = $props();
+
+  $effect(() => {
+    const current = repo;
+    const origin = current.origin;
+    const controller = new AbortController();
+    current.avatar = null;
+    if (origin) {
+      ownerAvatar(origin, controller.signal).then((url) => {
+        if (!controller.signal.aborted) current.avatar = url;
+      }).catch(() => { /* Offline or private metadata: keep initials. */ });
+    }
+    return () => controller.abort();
+  });
 
   // Narrow panes (split view, small window): keep room for the graph.
   let width = $state(1200);

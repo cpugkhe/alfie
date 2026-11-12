@@ -2,30 +2,10 @@
   import type { RepoState } from '$lib/state/repo.svelte';
   import { app } from '$lib/state/app.svelte';
   import { fetch, pull, push, redo, undo, updateFromBase } from '$lib/actions';
-  import { ownerAvatar } from '$lib/remote';
 
   let { repo }: { repo: RepoState } = $props();
 
-  let avatar = $state<string | null>(null);
-
-  /** `github.com:owner/repo` → host, owner, repo */
-  const remote = $derived.by(() => {
-    const m = repo.remote?.match(/^([^:]+):(.+)$/);
-    if (!m) return null;
-    const parts = m[2].split('/');
-    return { host: m[1], owner: parts[0], path: m[2] };
-  });
-  $effect(() => {
-    const current = remote;
-    const controller = new AbortController();
-    avatar = null;
-    if (current) {
-      ownerAvatar(current, controller.signal).then((url) => {
-        if (!controller.signal.aborted) avatar = url;
-      }).catch(() => { /* Offline or private metadata: keep initials. */ });
-    }
-    return () => controller.abort();
-  });
+  const remote = $derived(repo.origin);
 
   const branch = $derived(repo.status?.branch ?? null);
   const undoTop = $derived(repo.undoStack.at(-1));
@@ -35,8 +15,8 @@
 
 <div class="toolbar">
   <span class="origin" title={remote ? `origin: ${remote.host}/${remote.path}` : 'No origin remote'}>
-    {#if avatar}
-      <img src={avatar} alt="{remote?.owner} profile" referrerpolicy="no-referrer" onerror={() => (avatar = null)} />
+    {#if repo.avatar}
+      <img src={repo.avatar} alt="{remote?.owner} profile" referrerpolicy="no-referrer" onerror={() => (repo.avatar = null)} />
     {:else}
       <span class="letter" class:none={!remote}>{(remote?.owner ?? repo.name).slice(0, 1).toUpperCase()}</span>
     {/if}

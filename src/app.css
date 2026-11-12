@@ -1,0 +1,137 @@
+:root {
+  /* Nord (nordtheme.com), with the Polar Night backgrounds taken a step darker. */
+  --bg: #1b1f27;
+  --panel: #20242d;
+  --raised: #2a2f3a;
+  --hover: #272c36;
+  --select: #333a48;
+  --border: #2b313c;
+  --border-strong: #3b4252; /* nord1 */
+  --text: #d8dee9; /* nord4 */
+  --text-dim: #9aa5b8;
+  --text-faint: #616e88;
+  --accent: #88c0d0; /* nord8 */
+  --accent-hover: #9fd0de;
+  --accent-dim: rgba(136, 192, 208, 0.14);
+  --green: #a3be8c; /* nord14 */
+  --red: #bf616a; /* nord11 */
+  --red-hover: #d0737c;
+  --yellow: #ebcb8b; /* nord13 */
+  --purple: #b48ead; /* nord15 */
+  --diff-add: rgba(163, 190, 140, 0.13);
+  --diff-del: rgba(191, 97, 106, 0.16);
+
+  --lane-0: #88c0d0; /* nord8 */
+  --lane-1: #a3be8c; /* nord14 */
+  --lane-2: #ebcb8b; /* nord13 */
+  --lane-3: #b48ead; /* nord15 */
+  --lane-4: #d08770; /* nord12 */
+  --lane-5: #8fbcbb; /* nord7 */
+  --lane-6: #81a1c1; /* nord9 */
+  --lane-7: #bf616a; /* nord11 */
+
+  --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  --row: 26px;
+  --tabbar: 38px;
+  --radius: 6px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 var(--font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+kbd {
+  font: 11px/1 var(--font);
+  color: var(--text-dim);
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #3b4252;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4c566a;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

@@ -1,0 +1,355 @@
+//! Commands that change the repository.
+
+use super::diff::{self, DiffTarget};
+use super::runner::{git, Git};
+
+/// A write command, run with the repository's profile (SSH key, identity).
+fn w(repo: &str) -> Git {
+    // No command may open an editor: there is no terminal to show it in.
+    let mut cmd = Git::new(repo).write().env("GIT_EDITOR", "true");
+    for (key, value) in crate::profiles::env_for(repo) {
+        cmd = cmd.env(key, value);
+    }
+    cmd
+}
+
+/// Clones `url` into `dest` using whichever profile's rules match the URL.
+pub fn clone(url: &str, dest: &str) -> Result<(), String> {
+    let parent = std::path::Path::new(dest)
+        .parent()
+        .ok_or("invalid destination")?;
+    let mut cmd = Git::new(parent).write().args(["clone", "-q", "--", url, dest]);
+    let store = crate::profiles::load();
+    if let Some(profile) = crate::profiles::match_remote(&store, url) {
+        if let Some(ssh) = crate::profiles::ssh_command(profile) {
+            cmd = cmd.env("GIT_SSH_COMMAND", ssh);
+        }
+    }
+    done(cmd.run())
+}
+
+fn done(res: Result<super::runner::Output, String>) -> Result<(), String> {
+    res.map(|_| ())
+}
+
+fn has_head(repo: &str) -> bool {
+    super::log::head_oid(repo).is_some()
+}
+
+// ---------- index ----------
+
+pub fn stage(repo: &str, paths: &[String]) -> Result<(), String> {
+    done(w(repo).args(["add", "-A", "--"]).args(paths).run())
+}
+
+pub fn unstage(repo: &str, paths: &[String]) -> Result<(), String> {
+    let cmd = if has_head(repo) {
+        w(repo).args(["restore", "--staged", "--"])
+    } else {
+        w(repo).args(["rm", "-r", "-q", "--cached", "--"])
+    };
+    done(cmd.args(paths).run())
+}
+
+pub fn stage_all(repo: &str) -> Result<(), String> {
+    done(w(repo).args(["add", "-A"]).run())
+}
+
+pub fn unstage_all(repo: &str) -> Result<(), String> {
+    if has_head(repo) {
+        done(w(repo).args(["reset", "-q"]).run())
+    } else {
+        done(w(repo).args(["rm", "-r", "-q", "--cached", "."]).run())
+    }
+}
+
+/// Throws away unstaged changes. Untracked files are deleted.
+pub fn discard(repo: &str, tracked: &[String], untracked: &[String]) -> Result<(), String> {
+    if !tracked.is_empty() {
+        done(w(repo).args(["restore", "--worktree", "--"]).args(tracked).run())?;
+    }
+    if !untracked.is_empty() {
+        done(w(repo).args(["clean", "-f", "-q", "--"]).args(untracked).run())?;
+    }
+    Ok(())
+}
+
+/// Stages, unstages or discards one hunk, or only the given lines of it.
+/// `action` is `stage`, `unstage` or `discard`.
+pub fn apply_hunk(
+    repo: &str,
+    path: &str,
+    hunk: usize,
+    lines: Option<&[usize]>,
+    action: &str,
+) -> Result<(), String> {
+    let (target, args): (DiffTarget, &[&str]) = match action {
+        "stage" => (DiffTarget::Unstaged, &["--cached"]),
+        "unstage" => (DiffTarget::Staged, &["--cached", "--reverse"]),
+        "discard" => (DiffTarget::Unstaged, &["--reverse"]),
+        other => return Err(format!("unknown action {other}")),
+    };
+    // Always rebuild from a fresh diff so stale line numbers cannot be applied.
+    let file = diff::load(repo, &target, path, None)?;
+    let patch = diff::build_patch(&file, hunk, lines, action != "stage")?;
+    done(
+        w(repo)
+            .args(["apply", "--whitespace=nowarn"])
+            .args(args.iter().copied())
+            .arg("-")
+            .stdin(patch)
+            .run(),
+    )
+}
+
+// ---------- commits ----------
+
+pub fn commit(repo: &str, message: &str, amend: bool) -> Result<(), String> {
+    let mut cmd = w(repo).args(["commit", "-q", "-F", "-"]);
+    if amend {
+        cmd = cmd.arg("--amend");
+    }
+    done(cmd.stdin(message).run())
+}
+
+pub fn last_message(repo: &str) -> Result<String, String> {
+    git(repo, &["log", "-1", "--format=%B"]).map(|s| s.trim_end().to_string())
+}
+
+/// Moves the current branch to `target`. `mode`: soft, mixed, hard or keep.
+pub fn reset(repo: &str, target: &str, mode: &str) -> Result<(), String> {
+    if !matches!(mode, "soft" | "mixed" | "hard" | "keep") {
+        return Err(format!("unknown reset mode {mode}"));
+    }
+    done(
+        w(repo)
+            .args(["reset", "-q", &format!("--{mode}"), target, "--"])
+            .run(),
+    )
+}
+
+// ---------- history ----------
+
+pub fn merge(repo: &str, target: &str) -> Result<(), String> {
+    done(w(repo).args(["merge", "--no-edit", "-q", target, "--"]).run())
+}
+
+/// Replays the current branch on top of `onto`.
+pub fn rebase(repo: &str, onto: &str) -> Result<(), String> {
+    done(w(repo).args(["rebase", "-q", onto, "--"]).run())
+}
+
+fn is_merge_commit(repo: &str, sha: &str) -> bool {
+    git(repo, &["rev-parse", "--verify", "-q", &format!("{sha}^2")]).is_ok()
+}
+
+/// `revert` false: cherry-pick `sha` onto HEAD; true: commit its inverse.
+/// Merge commits are taken relative to their first parent.
+pub fn pick(repo: &str, sha: &str, revert: bool) -> Result<(), String> {
+    let mut cmd = w(repo).arg(if revert { "revert" } else { "cherry-pick" });
+    if revert {
+        cmd = cmd.arg("--no-edit");
+    }
+    if is_merge_commit(repo, sha) {
+        cmd = cmd.args(["-m", "1"]);
+    }
+    done(cmd.arg(sha).run())
+}
+
+/// Continue, skip or abort a stopped merge / rebase / cherry-pick / revert.
+pub fn sequence(repo: &str, kind: &str, action: &str) -> Result<(), String> {
+    if !matches!(kind, "merge" | "rebase" | "cherry-pick" | "revert") {
+        return Err(format!("unknown operation {kind}"));
+    }
+    if !matches!(action, "continue" | "skip" | "abort") || (kind == "merge" && action == "skip") {
+        return Err(format!("cannot {action} a {kind}"));
+    }
+    done(w(repo).args([kind.to_string(), format!("--{action}")]).run())
+}
+
+// ---------- tags ----------
+
+/// Lightweight tag, or annotated when `message` is given.
+pub fn create_tag(repo: &str, name: &str, target: &str, message: Option<&str>) -> Result<(), String> {
+    let cmd = match message.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => w(repo).args(["tag", "-a", "-m", m, "--", name, target]),
+        None => w(repo).args(["tag", "--", name, target]),
+    };
+    done(cmd.run())
+}
+
+pub fn delete_tag(repo: &str, name: &str) -> Result<(), String> {
+    done(w(repo).args(["tag", "-d", "--", name]).run())
+}
+
+fn default_remote(repo: &str) -> Result<String, String> {
+    let remotes = git(repo, &["remote"])?;
+    remotes
+        .lines()
+        .find(|r| *r == "origin")
+        .or_else(|| remotes.lines().next())
+        .map(str::to_string)
+        .ok_or_else(|| "This repository has no remote".to_string())
+}
+
+pub fn push_tag(repo: &str, name: &str) -> Result<(), String> {
+    let remote = default_remote(repo)?;
+    done(
+        w(repo)
+            .args(["push".to_string(), "-q".to_string(), remote, format!("refs/tags/{name}")])
+            .run(),
+    )
+}
+
+/// Removes the tag from the default remote; the local tag is left alone.
+pub fn delete_remote_tag(repo: &str, name: &str) -> Result<(), String> {
+    let remote = default_remote(repo)?;
+    // Git reports success when asked to delete a ref that is not there, so
+    // look first and say so plainly instead.
+    let found = w(repo)
+        .args(["ls-remote".to_string(), "--tags".to_string(), remote.clone(), format!("refs/tags/{name}")])
+        .run()?;
+    if found.stdout.trim().is_empty() {
+        return Err(format!("Tag {name} is not on {remote}"));
+    }
+    done(
+        w(repo)
+            .args(["push".to_string(), "-q".to_string(), remote, format!(":refs/tags/{name}")])
+            .run(),
+    )
+}
+
+// ---------- branches ----------
+
+fn local_exists(repo: &str, name: &str) -> bool {
+    git(
+        repo,
+        &["rev-parse", "--verify", "-q", &format!("refs/heads/{name}")],
+    )
+    .is_ok()
+}
+
+/// `kind`: `local`, `remote` (checks out a tracking branch) or anything else
+/// for a detached checkout of a tag or commit.
+pub fn checkout(repo: &str, target: &str, kind: &str) -> Result<(), String> {
+    let cmd = match kind {
+        "local" => w(repo).args(["checkout", "-q", target, "--"]),
+        "remote" => {
+            let local = target.split_once('/').map(|(_, b)| b).unwrap_or(target);
+            if local_exists(repo, local) {
+                w(repo).args(["checkout", "-q", local, "--"])
+            } else {
+                w(repo).args(["checkout", "-q", "--track", target, "--"])
+            }
+        }
+        _ => w(repo).args(["checkout", "-q", "--detach", target, "--"]),
+    };
+    done(cmd.run())
+}
+
+pub fn create_branch(
+    repo: &str,
+    name: &str,
+    start: Option<&str>,
+    checkout: bool,
+) -> Result<(), String> {
+    let mut cmd = if checkout {
+        w(repo).args(["checkout", "-q", "-b", name])
+    } else {
+        w(repo).args(["branch", name])
+    };
+    if let Some(start) = start {
+        cmd = cmd.arg(start);
+    }
+    done(cmd.run())
+}
+
+pub fn delete_branch(repo: &str, name: &str, force: bool) -> Result<(), String> {
+    done(
+        w(repo)
+            .args(["branch", if force { "-D" } else { "-d" }, name])
+            .run(),
+    )
+}
+
+pub fn rename_branch(repo: &str, old: &str, new: &str) -> Result<(), String> {
+    done(w(repo).args(["branch", "-m", old, new]).run())
+}
+
+// ---------- stash ----------
+
+pub fn stash_push(repo: &str, message: Option<&str>, untracked: bool) -> Result<(), String> {
+    let mut cmd = w(repo).args(["stash", "push", "-q"]);
+    if untracked {
+        cmd = cmd.arg("-u");
+    }
+    if let Some(m) = message.filter(|m| !m.trim().is_empty()) {
+        cmd = cmd.args(["-m", m]);
+    }
+    done(cmd.run())
+}
+
+/// `action`: `apply`, `pop` or `drop`.
+pub fn stash(repo: &str, name: &str, action: &str) -> Result<(), String> {
+    if !matches!(action, "apply" | "pop" | "drop") {
+        return Err(format!("unknown stash action {action}"));
+    }
+    done(w(repo).args(["stash", action, "-q", name]).run())
+}
+
+/// Changes a stash's message. Git has no rename, so the same stash commit is
+/// stored again under the new message and the old entry dropped. `sha` guards
+/// against the list having shifted since the UI read it.
+pub fn stash_rename(repo: &str, name: &str, sha: &str, message: &str) -> Result<(), String> {
+    let index: usize = name
+        .strip_prefix("stash@{")
+        .and_then(|s| s.strip_suffix('}'))
+        .and_then(|n| n.parse().ok())
+        .ok_or("not a stash name")?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Message cannot be empty".into());
+    }
+    let current = git(repo, &["rev-parse", "--verify", "-q", name])?;
+    if current.trim() != sha {
+        return Err("The stash list changed; try again".into());
+    }
+    done(w(repo).args(["stash", "store", "-m", message, sha]).run())?;
+    // The new entry is stash@{0}; the old one moved down by one.
+    done(
+        w(repo)
+            .args(["stash", "drop", "-q", &format!("stash@{{{}}}", index + 1)])
+            .run(),
+    )
+}
+
+// ---------- remotes ----------
+
+pub fn fetch(repo: &str) -> Result<(), String> {
+    done(w(repo).args(["fetch", "--all", "--prune", "-q"]).run())
+}
+
+pub fn pull(repo: &str) -> Result<(), String> {
+    done(w(repo).args(["pull", "--no-edit", "-q"]).run())
+}
+
+pub fn push(repo: &str, force: bool) -> Result<(), String> {
+    let has_upstream = git(repo, &["rev-parse", "--abbrev-ref", "@{u}"]).is_ok();
+    let mut cmd = w(repo).args(["push", "-q"]);
+    if force {
+        cmd = cmd.arg("--force-with-lease");
+    }
+    if !has_upstream {
+        let branch = git(repo, &["symbolic-ref", "--short", "HEAD"])
+            .map_err(|_| "HEAD is detached; check out a branch before pushing".to_string())?;
+        let remotes = git(repo, &["remote"])?;
+        let remote = remotes
+            .lines()
+            .find(|r| *r == "origin")
+            .or_else(|| remotes.lines().next())
+            .ok_or("This repository has no remote")?
+            .to_string();
+        cmd = cmd.args(["-u".to_string(), remote, branch.trim().to_string()]);
+    }
+    done(cmd.run())
+}

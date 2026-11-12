@@ -160,6 +160,7 @@ export class RepoState {
 
   /** Scroll offset of the graph, restored when the tab is shown again. */
   graphScroll = 0;
+  graphScrollLeft = 0;
 
   private refreshing = false;
   private dirty = false;

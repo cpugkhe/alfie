@@ -322,6 +322,28 @@ fn forked() -> Repo {
 }
 
 #[test]
+fn merge_creates_a_merge_commit_even_when_fast_forward_is_possible() {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit_all("base");
+    let original = log::head_oid(r.path()).unwrap();
+    ops::create_branch(r.path(), "topic", None, true).unwrap();
+    r.write("topic.txt", "topic\n");
+    r.commit_all("topic work");
+    let topic = log::head_oid(r.path()).unwrap();
+    ops::checkout(r.path(), "main", "local").unwrap();
+    r.sh(&["config", "merge.ff", "only"]);
+
+    ops::merge(r.path(), "topic").unwrap();
+
+    let page = log::load(r.path(), 10, "current").unwrap();
+    assert_eq!(page.commits[0].parents, vec![original, topic.clone()], "Merge must create a two-parent commit instead of fast-forwarding");
+    assert_eq!(r.sh(&["rev-parse", "topic"]).trim(), topic);
+    assert!(r.0.join("topic.txt").exists());
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+}
+
+#[test]
 fn merge_creates_merge_commit() {
     let r = forked();
     ops::merge(r.path(), "topic").unwrap();

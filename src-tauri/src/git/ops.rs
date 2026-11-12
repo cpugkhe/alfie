@@ -131,7 +131,7 @@ pub fn reset(repo: &str, target: &str, mode: &str) -> Result<(), String> {
 // ---------- history ----------
 
 pub fn merge(repo: &str, target: &str) -> Result<(), String> {
-    done(w(repo).args(["merge", "--no-edit", "-q", target, "--"]).run())
+    done(w(repo).args(["merge", "--no-ff", "--no-edit", "-q", target, "--"]).run())
 }
 
 /// Replays the current branch on top of `onto`.

@@ -2,7 +2,8 @@
   import { untrack } from 'svelte';
   import { WT, type RepoState } from '$lib/state/repo.svelte';
   import type { GraphRow } from '$lib/api';
-  import { relTime } from '$lib/util';
+  import { clamp, relTime } from '$lib/util';
+  import { COLUMN_SPACING, GRAPH_COLUMNS, MAX_COLUMN_WIDTH, graphColumnMin, graphColumnWidths, type GraphColumn } from '$lib/graph-columns';
   import { checkoutRef, commitMenu, refMenu, refsOnCommitMenu } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
 
@@ -20,6 +21,8 @@
   let searchEl = $state<HTMLInputElement>();
   let scrollTop = $state(0);
   let height = $state(600);
+  let viewportWidth = $state(800);
+  let drag = $state<{ column: GraphColumn; pointer: number; x: number; width: number; scale: number; saved: number | undefined } | null>(null);
 
   const filtering = $derived(repo.filter.trim() !== '');
 
@@ -31,7 +34,60 @@
     }
     return Math.min(m, MAX_LANES - 1);
   });
-  const graphW = $derived(filtering ? 0 : PAD * 2 + maxLane * LANE);
+  const naturalGraphW = $derived(filtering ? 0 : PAD * 2 + maxLane * LANE);
+  const widths = $derived(graphColumnWidths(viewportWidth, naturalGraphW, repo.prefs.graphColumns ?? {}));
+  const graphW = $derived(filtering ? 0 : widths.graph);
+  const columns = $derived(GRAPH_COLUMNS.filter((c) => c.key !== 'graph' || !filtering));
+  const template = $derived(columns.map((c) => `${widths[c.key]}px`).join(' '));
+  const tableWidth = $derived(columns.reduce((sum, c) => sum + widths[c.key], COLUMN_SPACING - (filtering ? 8 : 0)));
+
+  function setWidth(column: GraphColumn, width: number) {
+    repo.prefs.graphColumns = { ...repo.prefs.graphColumns, [column]: clamp(width, graphColumnMin(column, naturalGraphW), MAX_COLUMN_WIDTH) };
+  }
+
+  function resetWidth(column: GraphColumn) {
+    const saved = { ...repo.prefs.graphColumns };
+    delete saved[column];
+    repo.prefs.graphColumns = saved;
+    app.save();
+  }
+
+  function startResize(e: PointerEvent, column: GraphColumn) {
+    if (e.button !== 0 || !e.isPrimary || drag || !(e.currentTarget instanceof HTMLElement)) return;
+    e.preventDefault();
+    e.currentTarget.focus();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const scale = e.currentTarget.getBoundingClientRect().width / e.currentTarget.offsetWidth;
+    drag = { column, pointer: e.pointerId, x: e.clientX, width: widths[column], scale, saved: repo.prefs.graphColumns?.[column] };
+  }
+
+  function moveResize(e: PointerEvent) {
+    if (!drag || drag.pointer !== e.pointerId) return;
+    setWidth(drag.column, drag.width + (e.clientX - drag.x) / drag.scale);
+  }
+
+  function endResize(e: PointerEvent) {
+    if (!drag || drag.pointer !== e.pointerId) return;
+    drag = null;
+    app.save();
+  }
+
+  function resizeKey(e: KeyboardEvent, column: GraphColumn) {
+    if (e.key === 'Tab') { e.stopPropagation(); return; }
+    if (e.key === 'Escape' && drag) {
+      if (drag.saved === undefined) resetWidth(drag.column);
+      else setWidth(drag.column, drag.saved);
+      drag = null;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      setWidth(column, widths[column] + (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 50 : 10));
+    } else if (e.key === 'Home') setWidth(column, graphColumnMin(column, naturalGraphW));
+    else if (e.key === 'End') setWidth(column, MAX_COLUMN_WIDTH);
+    else if (e.key === 'Enter') resetWidth(column);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+    app.save();
+  }
 
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW) - 8));
   const end = $derived(Math.min(repo.items.length, start + Math.ceil(height / ROW) + 16));
@@ -70,7 +126,7 @@
     if (!el || i < 0) return;
     const top = i * ROW;
     if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + ROW > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW - el.clientHeight;
+    else if (top + ROW > el.scrollTop + el.clientHeight - 24) el.scrollTop = top + ROW - el.clientHeight + 24;
   });
 
   $effect(() => {
@@ -79,13 +135,17 @@
 
   // Restore the scroll offset when this tab is shown again.
   $effect(() => {
-    if (el) el.scrollTop = untrack(() => repo.graphScroll);
+    if (el) {
+      el.scrollTop = untrack(() => repo.graphScroll);
+      el.scrollLeft = untrack(() => repo.graphScrollLeft);
+    }
   });
 
   function onScroll() {
     if (!el) return;
     scrollTop = el.scrollTop;
     repo.graphScroll = scrollTop;
+    repo.graphScrollLeft = el.scrollLeft;
     if (repo.hasMore && !filtering && end >= repo.items.length - 40) repo.loadMore();
   }
 
@@ -95,7 +155,7 @@
   }
 </script>
 
-<div class="graph" class:focused={repo.focus === 'graph'}>
+<div class="graph" class:focused={repo.focus === 'graph'} class:resizing={!!drag}>
   {#if repo.historyRef || repo.scope !== 'all'}
     <div class="history">
       <span class="truncate">{repo.historyRef ? repo.historyRef.replace(/^refs\/(heads|remotes)\//, '') : repo.scope === 'current' ? 'Current branch' : 'Local branches'} history</span>
@@ -123,15 +183,35 @@
     </div>
   {/if}
 
-  <div class="cols">
-    <span class="refs">Branch / Tag</span>
-    {#if graphW}<span style:width="{graphW}px" class="c-graph">Graph</span>{/if}
-    <span class="subject">Commit message</span>
-    <span class="author">Author</span>
-    <span class="sha">SHA</span>
-    <span class="time"></span>
-  </div>
-  <div class="scroll" bind:this={el} bind:clientHeight={height} onscroll={onScroll}>
+  <div class="scroll" bind:this={el} bind:clientHeight={height} bind:clientWidth={viewportWidth} onscroll={onScroll}>
+    <div class="table" style:--columns={template} style:width="max(100%, {tableWidth}px)">
+      <div class="cols">
+        {#each columns as column (column.key)}
+          <div class="col" class:align-end={column.key === 'author' || column.key === 'time'} class:active={drag?.column === column.key}>
+            <span class="truncate">{column.label}</span>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (Focusable separators implement the ARIA splitter keyboard pattern.) -->
+            <div
+              class="resize"
+              role="separator"
+              tabindex="0"
+              aria-label="Resize {column.label} column"
+              aria-orientation="vertical"
+              aria-valuemin={graphColumnMin(column.key, naturalGraphW)}
+              aria-valuemax={MAX_COLUMN_WIDTH}
+              aria-valuenow={widths[column.key]}
+              aria-valuetext="{Math.round(widths[column.key])} pixels"
+              title="Drag to resize · Double-click or press Enter to reset · Arrow keys to adjust"
+              onpointerdown={(e) => startResize(e, column.key)}
+              onpointermove={moveResize}
+              onpointerup={endResize}
+              onpointercancel={endResize}
+              onlostpointercapture={endResize}
+              onkeydown={(e) => resizeKey(e, column.key)}
+              ondblclick={() => resetWidth(column.key)}
+            ></div>
+          </div>
+        {/each}
+      </div>
     <div class="spacer" style:height="{repo.items.length * ROW}px">
       <div class="window" style:transform="translateY({start * ROW}px)">
         {#each visible as item (item.type === 'wt' ? WT : item.commit.id)}
@@ -144,8 +224,7 @@
                   <circle cx={x(0)} cy={MID} r="4" class="wt-node" />
                 </svg>
               {/if}
-              <span class="subject truncate">Uncommitted changes</span>
-              <span class="count">{repo.dirtyCount}</span>
+              <span class="subject wt-message"><span class="truncate">Uncommitted changes</span><span class="count">{repo.dirtyCount}</span></span>
             </div>
           {:else}
             {@const c = item.commit}
@@ -232,6 +311,7 @@
         {/each}
       </div>
     </div>
+    </div>
 
     {#if repo.loaded && repo.items.length === 0}
       <div class="empty">
@@ -296,9 +376,18 @@
   }
   .scroll {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-height: 0;
+    overflow: auto;
     position: relative;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+  }
+  .table { min-height: 100%; }
+  .cols,
+  .row {
+    display: grid;
+    grid-template-columns: var(--columns);
+    column-gap: 8px;
   }
   .spacer {
     position: relative;
@@ -308,11 +397,9 @@
     inset: 0 0 auto 0;
   }
   .row {
-    display: flex;
     align-items: center;
     height: 26px;
     padding-right: 12px;
-    gap: 8px;
     border-left: 2px solid transparent;
   }
   /* Each commit carries a band in its branch colour, starting at its node. */
@@ -321,8 +408,6 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    width: var(--refs-w);
-    flex: none;
     min-width: 0;
     height: 100%;
     padding-left: 8px;
@@ -353,12 +438,13 @@
     );
   }
   .cols {
-    display: flex;
     align-items: center;
-    gap: 8px;
     height: 24px;
-    padding: 0 22px 0 2px;
-    flex: none;
+    padding: 0 12px 0 2px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--panel);
     border-bottom: 1px solid var(--border);
     font-size: 10.5px;
     font-weight: 600;
@@ -366,18 +452,43 @@
     text-transform: uppercase;
     color: var(--text-faint);
   }
-  .cols .c-graph {
-    flex: none;
-    padding-left: 10px;
-    overflow: hidden;
+  .col {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    height: 100%;
+    padding: 0 6px 0 0;
   }
-  .cols .author,
-  .cols .sha {
-    font-size: 10.5px;
-    color: var(--text-faint);
+  .col:first-child { padding-left: 8px; }
+  .col.align-end { justify-content: flex-end; }
+  .resize {
+    position: absolute;
+    inset: 0 -5px 0 auto;
+    width: 10px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
   }
-  .cols .sha {
-    width: 50px;
+  .resize::after {
+    content: '';
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    left: 4px;
+    width: 1px;
+    background: var(--border-strong);
+  }
+  .col.active .resize::after,
+  .resize:focus-visible::after {
+    background: var(--accent);
+    width: 2px;
+  }
+  .resize:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+  .resizing,
+  .resizing .row { cursor: col-resize; }
+  @media (hover: hover) and (pointer: fine) {
+    .resize:hover::after { background: var(--accent); width: 2px; }
   }
   .lead svg {
     margin-block: -3px;
@@ -422,8 +533,7 @@
     margin-right: 0;
   }
   .subject {
-    flex: 1;
-    min-width: 60px;
+    min-width: 0;
   }
   .subject.is-merge {
     color: var(--text-dim);
@@ -437,22 +547,21 @@
     background: color-mix(in srgb, var(--yellow) 14%, transparent);
     border-radius: 8px;
     padding: 1px 7px;
-  }
-  .author {
-    width: 120px;
     flex: none;
+  }
+  .wt-message { display: flex; align-items: center; gap: 8px; }
+  .author {
     color: var(--text-dim);
     font-size: 12px;
     text-align: right;
   }
   .sha {
-    flex: none;
     color: var(--text-faint);
     font-size: 11px;
+    overflow: hidden;
+    white-space: nowrap;
   }
   .time {
-    width: 34px;
-    flex: none;
     color: var(--text-faint);
     font-size: 12px;
     text-align: right;
@@ -462,9 +571,6 @@
     gap: 4px;
     flex: 0 1 auto;
     min-width: 0;
-  }
-  .graph {
-    --refs-w: 190px;
   }
   .badge {
     display: inline-flex;
@@ -529,25 +635,10 @@
   }
   .empty {
     position: absolute;
-    inset: 0;
+    inset: 24px 0 0;
     display: grid;
     place-items: center;
     color: var(--text-faint);
-  }
-  .graph {
-    container-type: inline-size;
-  }
-  @container (max-width: 640px) {
-    .sha {
-      display: none;
-    }
-    .refs {
-      width: 120px;
-    }
-  }
-  @container (max-width: 480px) {
-    .author {
-      display: none;
-    }
+    pointer-events: none;
   }
 </style>

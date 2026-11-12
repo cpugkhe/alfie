@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { GraphColumnWidths } from '$lib/graph-columns';
 
 export type Seg = [lane: number, color: number];
 
@@ -186,6 +187,7 @@ export type Sections = Record<SectionKey, { collapsed: boolean; sort: SectionSor
 /** View settings shared by every repository. */
 export interface Prefs {
   fileView: 'list' | 'tree';
+  graphColumns?: GraphColumnWidths;
 }
 
 export interface SpaceData {

@@ -5,7 +5,9 @@ import {
   type DiffTarget,
   type FileChange,
   type FileDiff,
+  type BaseInfo,
   type LogScope,
+  type RepoLocal,
   type Prefs,
   type Ref,
   type RepoStatus,
@@ -26,7 +28,7 @@ export type GraphItem = { type: 'wt' } | { type: 'commit'; commit: Commit };
 
 export type SidebarItem =
   | { type: 'header'; key: SectionKey; label: string; count: number; collapsed: boolean; sort: Sections[SectionKey]['sort'] }
-  | { type: 'ref'; ref: Ref; current: boolean }
+  | { type: 'ref'; ref: Ref; current: boolean; fav: boolean; pinned: boolean }
   | { type: 'stash'; stash: Stash };
 
 /** One entry of the file list in the detail pane. */
@@ -124,11 +126,16 @@ export class RepoState {
   op = $state<string | null>(null);
   /** Shared sidebar section settings (collapsed, sort); owned by the app. */
   sections = $state<Sections>({
+    favorite: { collapsed: false, sort: 'name' },
     local: { collapsed: false, sort: 'name' },
     remote: { collapsed: false, sort: 'name' },
     tag: { collapsed: false, sort: 'recent' },
     stash: { collapsed: false, sort: 'recent' },
   });
+  /** Favourites and base branches of this repository; owned by the app. */
+  local = $state<RepoLocal>({ favorites: [], bases: {} });
+  /** The branch the current one comes from, and how far behind it we are. */
+  base = $state<BaseInfo>({ name: null, target: null, behind: 0, guessed: false });
   /** Shared view settings; owned by the app. */
   prefs = $state<Prefs>({ fileView: 'list' });
   fileFilter = $state('');
@@ -230,6 +237,22 @@ export class RepoState {
   sidebar = $derived.by<SidebarItem[]>(() => {
     const out: SidebarItem[] = [];
     const current = this.status?.branch;
+    const favs = new Set(this.local.favorites);
+    const sorted = (list: Ref[], sort: 'name' | 'recent') =>
+      sort === 'recent'
+        ? list.sort((a, b) => b.time - a.time || a.short.localeCompare(b.short))
+        : list.sort((a, b) => a.short.localeCompare(b.short));
+
+    // Favourites first: the branches you keep coming back to.
+    const fcfg = this.sections.favorite;
+    const pinned = sorted(this.refs.filter((r) => favs.has(r.name)), fcfg.sort);
+    out.push({ type: 'header', key: 'favorite', label: 'Favorites', count: pinned.length, collapsed: fcfg.collapsed, sort: fcfg.sort });
+    if (!fcfg.collapsed) {
+      for (const ref of pinned) {
+        out.push({ type: 'ref', ref, current: ref.kind === 'local' && ref.short === current, fav: true, pinned: true });
+      }
+    }
+
     const section = (label: string, kind: Ref['kind']) => {
       const cfg = this.sections[kind];
       const list = this.refs.filter((r) => r.kind === kind);
@@ -238,7 +261,7 @@ export class RepoState {
       out.push({ type: 'header', key: kind, label, count: list.length, collapsed: cfg.collapsed, sort: cfg.sort });
       if (cfg.collapsed) return;
       for (const ref of list) {
-        out.push({ type: 'ref', ref, current: kind === 'local' && ref.short === current });
+        out.push({ type: 'ref', ref, current: kind === 'local' && ref.short === current, fav: favs.has(ref.name), pinned: false });
       }
     };
     section('Local', 'local');
@@ -401,6 +424,9 @@ export class RepoState {
         ]);
         this.profile = profile;
         this.remote = remote;
+        this.base = await api
+          .repoBase(this.path, (status.branch && this.local.bases[status.branch]) || null)
+          .catch(() => ({ name: null, target: null, behind: 0, guessed: false }));
         this.status = status;
         this.refs = refs.refs;
         this.stashes = refs.stashes;

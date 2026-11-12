@@ -421,3 +421,87 @@ fn tags_create_delete_push() {
     // deleting one that is not there is an error, not a silent success
     assert!(ops::delete_remote_tag(r.path(), "v2").is_err());
 }
+
+/// origin with one commit on main, and a clone-like repo tracking it.
+fn with_origin() -> (Repo, Repo) {
+    let origin = Repo::new();
+    origin.sh(&["config", "receive.denyCurrentBranch", "ignore"]);
+    origin.write("a.txt", "one\n");
+    origin.commit_all("init");
+    let r = Repo::new();
+    r.sh(&["remote", "add", "origin", origin.path()]);
+    ops::fetch(r.path()).unwrap();
+    ops::checkout(r.path(), "origin/main", "remote").unwrap();
+    (origin, r)
+}
+
+#[test]
+fn update_branch_fast_forwards_without_checkout() {
+    let (origin, r) = with_origin();
+    ops::create_branch(r.path(), "feature", None, true).unwrap();
+    origin.write("b.txt", "b\n");
+    origin.commit_all("remote work");
+
+    // main is not checked out; it still moves forward
+    ops::update_branch(r.path(), "main").unwrap();
+    assert_eq!(r.sh(&["rev-parse", "main"]), origin.sh(&["rev-parse", "main"]));
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("feature"));
+    assert!(!r.0.join("b.txt").exists());
+
+    // a branch with its own commits is refused, not rewritten
+    ops::checkout(r.path(), "main", "local").unwrap();
+    r.write("local.txt", "l\n");
+    r.commit_all("local only");
+    ops::checkout(r.path(), "feature", "local").unwrap();
+    origin.write("c.txt", "c\n");
+    origin.commit_all("more remote work");
+    let local_main = r.sh(&["rev-parse", "main"]);
+    assert!(ops::update_branch(r.path(), "main").is_err());
+    assert_eq!(r.sh(&["rev-parse", "main"]), local_main);
+
+    // no upstream: clear error
+    assert!(ops::update_branch(r.path(), "feature").unwrap_err().contains("no upstream"));
+}
+
+#[test]
+fn update_branch_pulls_when_it_is_the_current_one() {
+    let (origin, r) = with_origin();
+    origin.write("b.txt", "b\n");
+    origin.commit_all("remote work");
+    ops::update_branch(r.path(), "main").unwrap();
+    assert!(r.0.join("b.txt").exists());
+}
+
+#[test]
+fn base_is_guessed_counted_and_merged_in() {
+    let (origin, r) = with_origin();
+    // on main itself there is no base
+    assert_eq!(ops::base_info(r.path(), None).name, None);
+
+    ops::create_branch(r.path(), "feature", None, true).unwrap();
+    r.write("f.txt", "f\n");
+    r.commit_all("feature work");
+    let info = ops::base_info(r.path(), None);
+    assert_eq!(info.name.as_deref(), Some("main"));
+    assert_eq!(info.target.as_deref(), Some("origin/main"));
+    assert!(info.guessed);
+    assert_eq!(info.behind, 0);
+
+    origin.write("b.txt", "b\n");
+    origin.commit_all("remote work");
+    ops::fetch(r.path()).unwrap();
+    assert_eq!(ops::base_info(r.path(), Some("main")).behind, 1);
+    assert!(!ops::base_info(r.path(), Some("main")).guessed);
+
+    origin.write("c.txt", "c\n");
+    origin.commit_all("newer remote work");
+    // fetches the newest base itself, then merges
+    ops::update_from_base(r.path(), "main").unwrap();
+    assert!(r.0.join("b.txt").exists() && r.0.join("c.txt").exists() && r.0.join("f.txt").exists());
+    assert_eq!(ops::base_info(r.path(), Some("main")).behind, 0);
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("feature"));
+    // local main was moved forward too
+    assert_eq!(r.sh(&["rev-parse", "main"]), origin.sh(&["rev-parse", "main"]));
+    // a base that is gone falls back to the guess
+    assert_eq!(ops::base_info(r.path(), Some("nope")).name.as_deref(), Some("main"));
+}

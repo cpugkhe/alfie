@@ -36,7 +36,7 @@
     if (e.key === 'Escape') close();
     else if (e.key === 'ArrowDown' || e.key === 'j') index = (index + 1) % n;
     else if (e.key === 'ArrowUp' || e.key === 'k') index = (index - 1 + n) % n;
-    else if (e.key === 'Enter' && index >= 0) choose(index);
+    else if (e.key === 'Enter' && index >= 0 && !m.items[index].disabled) choose(index);
     else return close();
     e.preventDefault();
     e.stopPropagation();
@@ -54,9 +54,13 @@
         role="menuitem"
         class:sel={i === index}
         class:danger={item.danger}
+        disabled={item.disabled}
         onmousemove={() => (index = i)}
-        onclick={() => choose(i)}>{item.label}</button
+        onclick={() => choose(i)}
       >
+        <span class="label">{item.label}</span>
+        {#if item.hint}<span class="hint">{item.hint}</span>{/if}
+      </button>
     {/each}
   </div>
 {/if}
@@ -78,7 +82,9 @@
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   }
   button {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 16px;
     width: 100%;
     height: 26px;
     padding: 0 10px;
@@ -88,6 +94,18 @@
   }
   button.sel {
     background: var(--select);
+  }
+  .label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hint {
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  button:disabled {
+    color: var(--text-dim);
   }
   button.danger {
     color: var(--red);

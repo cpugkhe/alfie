@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RepoState, SidebarItem } from '$lib/state/repo.svelte';
-  import { activateSidebar, newBranch, refMenu, stashMenu } from '$lib/actions';
+  import { activateSidebar, newBranch, refMenu, stashMenu, toggleFavorite, updateBranch } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
   import type { SectionKey } from '$lib/api';
 
@@ -70,6 +70,9 @@
         onclick={(e) => sort(e, item.key)}>{item.sort === 'name' ? 'A–Z' : 'Recent'}</button
       >
     </div>
+    {#if item.key === 'favorite' && !item.collapsed && !g.rows.length}
+      <div class="hint">Press <kbd>F</kbd> on a branch, or click its ☆, to keep it here.</div>
+    {/if}
     {#if g.rows.length}
       <!-- At most ten rows tall; longer sections scroll on their own. -->
       <div class="rows">
@@ -92,13 +95,34 @@
             >
               <span class="mark">{row.item.current ? '●' : ''}</span>
               <span class="label truncate">{ref.short}</span>
+              {#if ref.kind !== 'tag'}
+                <button
+                  class="act star"
+                  class:on={row.item.fav}
+                  title={row.item.fav ? 'Remove from favorites (F)' : 'Add to favorites (F)'}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(repo, ref);
+                  }}>{row.item.fav ? '★' : '☆'}</button
+                >
+              {/if}
               {#if ref.gone}
                 <span class="track gone" title="Upstream branch is gone">gone</span>
-              {:else if ref.ahead || ref.behind}
-                <span class="track">
-                  {#if ref.ahead}↑{ref.ahead}{/if}
-                  {#if ref.behind}↓{ref.behind}{/if}
-                </span>
+              {:else if ref.behind}
+                <button
+                  class="track behind"
+                  title="{ref.behind} behind {ref.upstream}{ref.ahead ? `, ${ref.ahead} ahead` : ''} — click to update (U)"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    updateBranch(repo, ref);
+                  }}
+                >
+                  {#if ref.ahead}↑{ref.ahead}{/if} ↓{ref.behind}
+                </button>
+              {:else if ref.ahead}
+                <span class="track" title="{ref.ahead} ahead of {ref.upstream} — not pushed yet">↑{ref.ahead}</span>
+              {:else if row.item.pinned && ref.upstream}
+                <span class="track ok" title="Up to date with {ref.upstream} as of the last fetch">✓</span>
               {/if}
             </div>
           {:else if row.item.type === 'stash'}
@@ -226,5 +250,50 @@
   }
   .track.gone {
     color: var(--red);
+  }
+  .track.ok {
+    color: var(--green);
+  }
+  button.track.behind {
+    padding: 0 6px;
+    height: 17px;
+    border-radius: 9px;
+    color: var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 14%, transparent);
+    white-space: nowrap;
+  }
+  button.track.behind:hover {
+    background: color-mix(in srgb, var(--yellow) 30%, transparent);
+  }
+  .act {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-faint);
+    visibility: hidden;
+  }
+  .item:hover .act,
+  .focused .item.sel .act {
+    visibility: visible;
+  }
+  .act:hover {
+    color: var(--yellow);
+    background: var(--border-strong);
+  }
+  .star.on {
+    color: var(--yellow);
+  }
+  .hint {
+    padding: 2px 12px 4px 24px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-faint);
+  }
+  .hint kbd {
+    font-size: 10px;
+    padding: 1px 4px;
   }
 </style>

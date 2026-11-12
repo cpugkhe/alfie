@@ -24,13 +24,30 @@
       await app.init();
     };
     app.onMenu = menuAction;
+
+    // WebKit keeps a text field focused when you click on non-selectable UI
+    // (most of this app). Single-key shortcuts would then be typed into that
+    // field instead of acting on what was just clicked, so let go of it.
+    const releaseTextFocus = (e: MouseEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+      if (!typing) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable], label')) return;
+      active.blur();
+    };
+    window.addEventListener('mousedown', releaseTextFocus, true);
     start();
-    return installKeymap({
+    const removeKeymap = installKeymap({
       commands: () => commands,
       scopes: activeScopes,
       overlayOpen: () => app.palette !== null || app.helpOpen,
       blocked: () => app.dialog !== null || app.spacesOpen || app.profilesOpen,
     });
+    return () => {
+      removeKeymap();
+      window.removeEventListener('mousedown', releaseTextFocus, true);
+    };
   });
 
   const split = $derived(app.secondary ? app.space.split : null);

@@ -24,6 +24,13 @@ const CODES: Record<string, string> = {
 };
 
 function press(combo: string) {
+  // `click:<css selector>` clicks an element instead of pressing a key.
+  if (combo.startsWith('click:')) {
+    const el = document.querySelector<HTMLElement>(decodeURIComponent(combo.slice(6)));
+    el?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    el?.click();
+    return;
+  }
   const parts = combo.split('+');
   const key = parts.pop()!;
   const code = CODES[key] ?? (/^\d$/.test(key) ? `Digit${key}` : `Key${key.toUpperCase()}`);
@@ -50,12 +57,25 @@ export function install() {
         { name: 'Side projects', tabs: ['/demo/design-tokens'], active: 0, split: null },
       ],
       space: 0,
+      repos: { [REPO]: { favorites: ['refs/heads/main', 'refs/heads/feature/login'], bases: {} } },
       recents: [REPO, '/demo/web-client', '/demo/infra', '/demo/design-tokens', '/demo/billing-worker'],
     }),
     session_save: () => null,
     repo_open: ({ path }) => ({ path, name: path.slice(path.lastIndexOf('/') + 1) }),
     repo_status: () => f.status,
-    repo_refs: () => f.refs,
+    // Give a few branches an upstream so status chips can be previewed.
+    repo_refs: () => ({
+      ...f.refs,
+      refs: f.refs.refs.map((r: any) =>
+        r.short === 'main'
+          ? { ...r, upstream: 'origin/main' }
+          : r.short === 'feature/login'
+            ? { ...r, upstream: 'origin/feature/login', behind: 2 }
+            : r.short === 'hotfix/crash'
+              ? { ...r, upstream: 'origin/hotfix/crash', ahead: 1 }
+              : r,
+      ),
+    }),
     repo_log: () => f.log,
     commit_detail: ({ sha }) => f.details[sha],
     diff_file: ({ target, path }) =>
@@ -64,6 +84,9 @@ export function install() {
     unwatch_repo: () => null,
     git_log: () => [],
     reset: () => null,
+    update_branch: () => null,
+    update_from_base: () => null,
+    repo_base: () => ({ name: 'main', target: 'origin/main', behind: 3, guessed: true }),
     ...Object.fromEntries(
       ['merge', 'rebase', 'pick', 'sequence', 'create_tag', 'delete_tag', 'push_tag', 'delete_remote_tag'].map((c) => [c, () => null]),
     ),

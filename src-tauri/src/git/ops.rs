@@ -167,6 +167,138 @@ pub fn sequence(repo: &str, kind: &str, action: &str) -> Result<(), String> {
     done(w(repo).args([kind.to_string(), format!("--{action}")]).run())
 }
 
+// ---------- keeping branches current ----------
+
+fn ref_exists(repo: &str, full: &str) -> bool {
+    git(repo, &["rev-parse", "--verify", "-q", full]).is_ok()
+}
+
+fn current_branch(repo: &str) -> Option<String> {
+    git(repo, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// `origin/main` → (`origin`, `main`), checked against the real remote names
+/// so a branch called `feature/x` on remote `up/stream` splits correctly.
+fn split_remote(repo: &str, short: &str) -> Option<(String, String)> {
+    let remotes = git(repo, &["remote"]).ok()?;
+    remotes
+        .lines()
+        .filter(|r| short.starts_with(&format!("{r}/")))
+        .max_by_key(|r| r.len())
+        .map(|r| (r.to_string(), short[r.len() + 1..].to_string()))
+}
+
+fn upstream_of(repo: &str, branch: &str) -> Option<String> {
+    git(repo, &["rev-parse", "--abbrev-ref", &format!("{branch}@{{u}}")])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Brings a branch up to date with its upstream, fast-forward only, without
+/// needing to check it out. `name` is a local branch or a remote one
+/// (`origin/x`), which is simply fetched.
+pub fn update_branch(repo: &str, name: &str) -> Result<(), String> {
+    if !ref_exists(repo, &format!("refs/heads/{name}")) {
+        let (remote, branch) = split_remote(repo, name).ok_or("No such branch")?;
+        return done(w(repo).args(["fetch", "-q", &remote, &branch]).run());
+    }
+    let upstream = upstream_of(repo, name).ok_or_else(|| format!("{name} has no upstream to update from"))?;
+    let (remote, branch) = split_remote(repo, &upstream).ok_or("Upstream is not on a remote")?;
+    if current_branch(repo).as_deref() == Some(name) {
+        return done(w(repo).args(["pull", "--ff-only", "-q", &remote, &branch]).run());
+    }
+    // Updating a branch that is not checked out: fetch straight into it.
+    // Git refuses unless it is a fast-forward, so local commits are safe.
+    done(
+        w(repo)
+            .args(["fetch".to_string(), "-q".to_string(), remote, format!("{branch}:{name}")])
+            .run(),
+    )
+}
+
+#[derive(serde::Serialize, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseInfo {
+    /// Branch the current one is considered to come from, e.g. `main`.
+    pub name: Option<String>,
+    /// What actually gets merged: the base's upstream when it has one.
+    pub target: Option<String>,
+    /// Commits on the target that the current branch does not have.
+    pub behind: u32,
+    /// True when `name` was guessed rather than given.
+    pub guessed: bool,
+}
+
+/// The repository's main line: what `origin/HEAD` points at, else a
+/// conventional name that exists.
+fn default_branch(repo: &str) -> Option<String> {
+    if let Ok(head) = git(repo, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]) {
+        let short = head.trim();
+        if let Some((_, branch)) = split_remote(repo, short) {
+            if ref_exists(repo, &format!("refs/heads/{branch}")) {
+                return Some(branch);
+            }
+            return Some(short.to_string());
+        }
+    }
+    ["main", "master", "develop", "trunk"]
+        .into_iter()
+        .find(|b| ref_exists(repo, &format!("refs/heads/{b}")))
+        .map(str::to_string)
+}
+
+fn base_target(repo: &str, base: &str) -> Option<String> {
+    if ref_exists(repo, &format!("refs/heads/{base}")) {
+        Some(upstream_of(repo, base).filter(|u| ref_exists(repo, &format!("refs/remotes/{u}"))).unwrap_or_else(|| base.to_string()))
+    } else if ref_exists(repo, &format!("refs/remotes/{base}")) {
+        Some(base.to_string())
+    } else {
+        None
+    }
+}
+
+/// Where the current branch stands against its base. `base` None: guess.
+pub fn base_info(repo: &str, base: Option<&str>) -> BaseInfo {
+    let current = current_branch(repo);
+    let (name, guessed) = match base.filter(|b| base_target(repo, b).is_some()) {
+        Some(b) => (Some(b.to_string()), false),
+        None => (default_branch(repo), true),
+    };
+    // A branch is never its own base.
+    let name = name.filter(|n| Some(n) != current.as_ref());
+    let Some(name) = name else { return BaseInfo::default() };
+    let target = base_target(repo, &name);
+    let behind = target
+        .as_ref()
+        .and_then(|t| git(repo, &["rev-list", "--count", &format!("HEAD..{t}")]).ok())
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or(0);
+    BaseInfo { name: Some(name), target, behind, guessed }
+}
+
+/// Fetches the newest `base`, then merges it into the current branch.
+pub fn update_from_base(repo: &str, base: &str) -> Result<(), String> {
+    let target = base_target(repo, base).ok_or_else(|| format!("Base branch {base} no longer exists"))?;
+    if let Some((remote, branch)) = split_remote(repo, &target) {
+        let local_base = ref_exists(repo, &format!("refs/heads/{base}")) && current_branch(repo).as_deref() != Some(base);
+        // Also move the local base forward when that is a plain fast-forward;
+        // if it is not, a normal fetch still refreshes the remote branch.
+        let ff = local_base
+            && w(repo)
+                .args(["fetch".to_string(), "-q".to_string(), remote.clone(), format!("{branch}:{base}")])
+                .run()
+                .is_ok();
+        if !ff {
+            done(w(repo).args(["fetch", "-q", &remote, &branch]).run())?;
+        }
+    }
+    merge(repo, &target)
+}
+
 // ---------- tags ----------
 
 /// Lightweight tag, or annotated when `message` is given.

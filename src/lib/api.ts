@@ -162,7 +162,24 @@ export type HunkAction = 'stage' | 'unstage' | 'discard';
 export type LogScope = 'all' | 'local' | 'current';
 
 export type SplitDir = 'row' | 'column';
-export type SectionKey = 'local' | 'remote' | 'tag' | 'stash';
+export type SectionKey = 'favorite' | 'local' | 'remote' | 'tag' | 'stash';
+
+/** Per-repository choices kept by the app (not in git config). */
+export interface RepoLocal {
+  /** Full ref names pinned to the top of the sidebar. */
+  favorites: string[];
+  /** Branch → the branch it was started from. */
+  bases: Record<string, string>;
+}
+
+export interface BaseInfo {
+  name: string | null;
+  /** What gets merged: the base's upstream when it has one. */
+  target: string | null;
+  /** Commits on the base that the current branch lacks. */
+  behind: number;
+  guessed: boolean;
+}
 export type SectionSort = 'name' | 'recent';
 export type Sections = Record<SectionKey, { collapsed: boolean; sort: SectionSort }>;
 
@@ -187,6 +204,7 @@ export interface Session {
   sections: Sections;
   zoom?: number;
   prefs?: Prefs;
+  repos?: Record<string, RepoLocal>;
   /** Pre-spaces format, read once for migration. */
   tabs?: string[];
   active?: number;
@@ -253,6 +271,9 @@ export const api = {
   deleteTag: (repo: string, name: string) => invoke<void>('delete_tag', { repo, name }),
   pushTag: (repo: string, name: string) => invoke<void>('push_tag', { repo, name }),
   deleteRemoteTag: (repo: string, name: string) => invoke<void>('delete_remote_tag', { repo, name }),
+  updateBranch: (repo: string, name: string) => invoke<void>('update_branch', { repo, name }),
+  repoBase: (repo: string, base: string | null) => invoke<BaseInfo>('repo_base', { repo, base }),
+  updateFromBase: (repo: string, base: string) => invoke<void>('update_from_base', { repo, base }),
   stashRename: (repo: string, name: string, sha: string, message: string) =>
     invoke<void>('stash_rename', { repo, name, sha, message }),
   repoRemote: (repo: string) => invoke<string | null>('repo_remote', { repo }),

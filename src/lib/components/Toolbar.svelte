@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RepoState } from '$lib/state/repo.svelte';
   import { app } from '$lib/state/app.svelte';
-  import { fetch, pull, push, redo, undo } from '$lib/actions';
+  import { fetch, pull, push, redo, undo, updateFromBase } from '$lib/actions';
 
   let { repo }: { repo: RepoState } = $props();
 
@@ -80,6 +80,33 @@
   <button class="tool" disabled={busy} title="Push (⌘⇧K)" onclick={() => push(repo)}>
     <span class="ico">↑</span> Push{#if repo.status?.ahead}<span class="n">{repo.status.ahead}</span>{/if}
   </button>
+
+  {#if branch}
+    <span class="sep"></span>
+    <span class="base" class:behind={repo.base.behind > 0}>
+      <button
+        class="tool"
+        disabled={busy}
+        title={repo.base.name
+          ? repo.base.behind
+            ? `${repo.base.name} has ${repo.base.behind} new ${repo.base.behind === 1 ? 'commit' : 'commits'}. Fetch the latest ${repo.base.name} and merge it into ${branch} (⌘U)`
+            : `Fetch the latest ${repo.base.name} and merge it into ${branch} (⌘U). Nothing new as of the last fetch.`
+          : 'Choose which branch this one comes from'}
+        onclick={() => updateFromBase(repo)}
+      >
+        <span class="ico">⤓</span>
+        {#if repo.base.name}
+          Update from <b class="truncate">{repo.base.name}</b>
+          {#if repo.base.behind}<span class="n">{repo.base.behind}</span>{/if}
+        {:else}
+          Set base branch…
+        {/if}
+      </button>
+      {#if repo.base.name}
+        <button class="tool caret" title="Change base branch{repo.base.guessed ? ' (currently guessed)' : ''}" onclick={() => (app.palette = 'base')}>▾</button>
+      {/if}
+    </span>
+  {/if}
 
   <span class="spacer"></span>
   {#if repo.op}<span class="op truncate">{repo.op}</span>{/if}
@@ -197,6 +224,23 @@
     color: var(--bg);
     background: var(--accent);
     font-weight: 700;
+  }
+  .base {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+  .base b {
+    font-weight: 600;
+    max-width: 140px;
+    color: var(--text);
+  }
+  .base.behind .tool:first-child {
+    color: var(--text);
+  }
+  .caret {
+    padding: 0 4px;
+    font-size: 10px;
   }
   .spacer {
     flex: 1;

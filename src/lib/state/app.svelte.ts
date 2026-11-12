@@ -4,6 +4,7 @@ import {
   api,
   type Prefs,
   type ProfileStore,
+  type RepoLocal,
   type Sections,
   type Session,
   type SpaceData,
@@ -38,6 +39,9 @@ export interface Dialog {
 
 export interface MenuItem {
   label: string;
+  /** Small note on the right, e.g. "current". */
+  hint?: string;
+  disabled?: boolean;
   danger?: boolean;
   run: () => void;
 }
@@ -80,7 +84,7 @@ class App {
   spaceIdx = $state(0);
   recents = $state<string[]>([]);
   /** Which palette is open, if any. */
-  palette = $state<null | 'switch' | 'commands' | 'branches' | 'profiles' | 'merge' | 'rebase'>(null);
+  palette = $state<null | 'switch' | 'commands' | 'branches' | 'profiles' | 'merge' | 'rebase' | 'base'>(null);
   profiles = $state<ProfileStore>({ profiles: [], bindings: {} });
   profilesOpen = $state(false);
   dialog = $state<Dialog | null>(null);
@@ -92,7 +96,10 @@ class App {
   detailOpen = $state(true);
   sidebarW = $state(220);
   detailW = $state(380);
+  /** Favourite branches and base branches, per repository path. */
+  repoLocal = $state<Record<string, RepoLocal>>({});
   sections = $state<Sections>({
+    favorite: { collapsed: false, sort: 'name' },
     local: { collapsed: false, sort: 'name' },
     remote: { collapsed: false, sort: 'name' },
     tag: { collapsed: false, sort: 'recent' },
@@ -178,6 +185,8 @@ class App {
       tab.notify = (text, kind, context) => this.toast(text, kind, context);
       tab.sections = this.sections;
       tab.prefs = this.prefs;
+      if (!this.repoLocal[path]) this.repoLocal[path] = { favorites: [], bases: {} };
+      tab.local = this.repoLocal[path];
       this.pool.set(path, tab);
       api.watchRepo(path).catch(() => {});
     }
@@ -211,6 +220,9 @@ class App {
     this.detailW = session?.detailW ?? 380;
     if (session?.zoom && session.zoom !== 1) this.setZoom(session.zoom);
     if (session?.prefs) Object.assign(this.prefs, session.prefs);
+    for (const [path, local] of Object.entries(session?.repos ?? {})) {
+      this.repoLocal[path] = { favorites: local.favorites ?? [], bases: local.bases ?? {} };
+    }
     if (session?.sections) {
       for (const key of Object.keys(this.sections) as (keyof Sections)[]) {
         Object.assign(this.sections[key], session.sections[key] ?? {});
@@ -576,6 +588,7 @@ class App {
           sections: this.sections,
           zoom: this.zoom,
           prefs: this.prefs,
+          repos: this.repoLocal,
         })
         .catch((e) => this.toast(`Could not save session: ${e}`, 'error'));
     }, 200);

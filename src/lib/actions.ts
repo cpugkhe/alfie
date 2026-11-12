@@ -261,6 +261,13 @@ export async function newBranch(repo: RepoState, start: string | null = null, na
   const from = whereNow(repo);
   const failed = await repo.run('Creating branch…', () => api.createBranch(p(repo), clean, start, true));
   if (failed) return;
+  // Remember where it came from, for "Update from base".
+  const origin = start && start.length !== 40 ? start : !start && from.kind === 'local' ? from.short : null;
+  if (origin && origin !== clean) {
+    repo.local.bases[clean] = origin;
+    app.save();
+    repo.refresh();
+  }
   record(repo, { kind: 'checkout', label: `new branch ${clean}`, from, to: { short: clean, kind: 'local' } });
   repo.jumpToHead();
 }
@@ -354,6 +361,15 @@ export function refMenu(repo: RepoState, ref: Ref, current: boolean) {
   const items: { label: string; danger?: boolean; run: () => void }[] = [];
   if (ref.kind !== 'tag' && !current) items.push({ label: `Check out ${ref.short}`, run: () => void checkoutRef(repo, ref) });
   if (ref.kind === 'tag') items.push({ label: 'Check out (detached)', run: () => void checkoutRef(repo, ref) });
+  if (ref.kind !== 'tag') {
+    items.push({
+      label: repo.local.favorites.includes(ref.name) ? 'Remove from favorites' : 'Add to favorites',
+      run: () => toggleFavorite(repo, ref),
+    });
+    if (ref.kind === 'remote' || ref.upstream) {
+      items.push({ label: 'Update to latest', run: () => void updateBranch(repo, ref) });
+    }
+  }
   const here = repo.status?.branch;
   if (!current && here) {
     items.push({ label: `Merge ${ref.short} into ${here}`, run: () => void mergeRef(repo, ref.short) });
@@ -382,6 +398,69 @@ export async function dropStash(repo: RepoState, stash: Stash) {
     danger: true,
   });
   if (ok) await repo.run('Dropping stash…', () => api.stashAction(p(repo), stash.name, 'drop'));
+}
+
+// ---------- favourites, keeping branches current ----------
+
+export function toggleFavorite(repo: RepoState, ref: Ref) {
+  if (ref.kind === 'tag') return;
+  const cursor = repo.sidebar[repo.sidebarIdx];
+  const onPinned = cursor?.type === 'ref' && cursor.pinned;
+  const list = repo.local.favorites;
+  const at = list.indexOf(ref.name);
+  if (at >= 0) list.splice(at, 1);
+  else list.push(ref.name);
+  app.save();
+  repo.notify(at >= 0 ? `Removed ${ref.short} from favorites` : `Added ${ref.short} to favorites`);
+
+  // The list just grew or shrank above the cursor: stay on the same branch.
+  const same = repo.sidebar.findIndex((it) => it.type === 'ref' && it.ref.name === ref.name && it.pinned === onPinned);
+  repo.sidebarIdx = same >= 0 ? same : Math.min(repo.sidebarIdx, Math.max(0, repo.sidebar.length - 1));
+}
+
+/** Moves a branch up to its upstream. Works without checking it out. */
+export async function updateBranch(repo: RepoState, ref: Ref) {
+  if (ref.kind === 'tag') return;
+  if (ref.kind === 'local' && !ref.upstream) {
+    return repo.notify(`${ref.short} has no upstream, so there is nothing to update it from.`, 'error');
+  }
+  const current = ref.kind === 'local' && ref.short === repo.status?.branch;
+  const before = repo.head;
+  const err = await repo.run(`Updating ${ref.short}…`, () => api.updateBranch(p(repo), ref.short), { quiet: true });
+  if (err) {
+    if (/non-fast-forward|rejected|not possible to fast-forward|diverg/i.test(err)) {
+      repo.notify(`${ref.short} has commits its upstream lacks. Check it out, then pull or rebase.`, 'error');
+    } else {
+      repo.notify(err, 'error', `Updating ${ref.short}…`);
+    }
+    return;
+  }
+  if (current && before && repo.head && before !== repo.head) {
+    record(repo, { kind: 'move', mode: 'keep', label: `update ${ref.short}`, branch: ref.short, before, after: repo.head });
+  }
+  repo.notify(`${ref.short} is up to date`);
+}
+
+/** Merges the newest base branch (where this branch came from) into the current one. */
+export async function updateFromBase(repo: RepoState) {
+  const branch = repo.status?.branch;
+  if (!branch) return repo.notify('Check out a branch first.', 'error');
+  const base = repo.base.name;
+  if (!base) {
+    app.palette = 'base';
+    return;
+  }
+  await moveBranch(repo, `Updating ${branch} from ${base}…`, `update from ${base}`, () =>
+    api.updateFromBase(p(repo), base),
+  );
+}
+
+export function setBase(repo: RepoState, base: string) {
+  const branch = repo.status?.branch;
+  if (!branch) return;
+  repo.local.bases[branch] = base;
+  app.save();
+  repo.refresh();
 }
 
 // ---------- history edits ----------
@@ -526,6 +605,16 @@ export async function deleteRemoteTag(repo: RepoState, name: string) {
 
 export const pushTag = (repo: RepoState, name: string) =>
   repo.run(`Pushing tag ${name}…`, () => api.pushTag(p(repo), name), { done: `Pushed tag ${name}` });
+
+/** Every branch and tag sitting on one commit: pick one to switch to it. */
+export function refsOnCommitMenu(repo: RepoState, badges: { label: string; kind: string; ref?: { short: string; kind: 'local' | 'remote' } }[]) {
+  return badges.map((b) => ({
+    label: b.label,
+    hint: b.kind === 'head' ? 'current' : b.kind === 'remote' ? 'remote · check out' : b.kind === 'tag' ? 'tag · detached' : 'check out',
+    disabled: b.kind === 'head',
+    run: () => void checkoutRef(repo, b.ref ?? { short: b.label, kind: 'tag' }),
+  }));
+}
 
 export function commitMenu(repo: RepoState, sha: string) {
   const branch = repo.status?.branch;

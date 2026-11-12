@@ -407,6 +407,20 @@ export const commands: Command[] = [
     run: withRepo((r) => act.checkoutRef(r, { short: r.selectedId, kind: 'tag' })),
   },
   {
+    id: 'branch.updateFromBase',
+    title: 'Update current branch from its base branch',
+    keys: ['mod+u'],
+    scope: 'repo',
+    run: withRepo(act.updateFromBase),
+  },
+  {
+    id: 'branch.setBase',
+    title: 'Choose base branch for the current branch…',
+    scope: 'repo',
+    overlay: true,
+    run: () => (app.palette = app.palette === 'base' ? null : 'base'),
+  },
+  {
     id: 'branch.merge',
     title: 'Merge a branch into the current one…',
     keys: ['mod+shift+g'],
@@ -713,6 +727,30 @@ export const commands: Command[] = [
     run: withRepo((r) => {
       const item = r.sidebar[r.sidebarIdx];
       if (item?.type === 'stash') act.renameStash(r, item.stash);
+    }),
+  },
+  {
+    id: 'side.favorite',
+    title: 'Add / remove favorite',
+    keys: ['f'],
+    scope: 'sidebar',
+    hidden: true,
+    when: () => !!sidebarRef() && sidebarRef()?.kind !== 'tag',
+    run: withRepo((r) => {
+      const ref = sidebarRef();
+      if (ref) act.toggleFavorite(r, ref);
+    }),
+  },
+  {
+    id: 'side.update',
+    title: 'Update branch to latest',
+    keys: ['u'],
+    scope: 'sidebar',
+    hidden: true,
+    when: () => !!sidebarRef() && sidebarRef()?.kind !== 'tag',
+    run: withRepo((r) => {
+      const ref = sidebarRef();
+      if (ref) act.updateBranch(r, ref);
     }),
   },
   {

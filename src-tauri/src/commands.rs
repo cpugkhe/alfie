@@ -280,3 +280,20 @@ pub fn push_tag(repo: String, name: String) -> Result<(), String> {
 pub fn delete_remote_tag(repo: String, name: String) -> Result<(), String> {
     ops::delete_remote_tag(&repo, &name)
 }
+
+// ---------- keeping branches current ----------
+
+#[tauri::command(async)]
+pub fn update_branch(repo: String, name: String) -> Result<(), String> {
+    ops::update_branch(&repo, &name)
+}
+
+#[tauri::command(async)]
+pub fn repo_base(repo: String, base: Option<String>) -> ops::BaseInfo {
+    ops::base_info(&repo, base.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn update_from_base(repo: String, base: String) -> Result<(), String> {
+    ops::update_from_base(&repo, &base)
+}

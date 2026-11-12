@@ -3,7 +3,7 @@
   import { WT, type RepoState } from '$lib/state/repo.svelte';
   import type { GraphRow } from '$lib/api';
   import { relTime } from '$lib/util';
-  import { checkoutRef, commitMenu } from '$lib/actions';
+  import { checkoutRef, commitMenu, refsOnCommitMenu } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
 
   let { repo }: { repo: RepoState } = $props();
@@ -13,7 +13,8 @@
   const PAD = 12;
   const MAX_LANES = 16;
   const MID = ROW / 2;
-  const MAX_BADGES = 3;
+  // The branch column is narrow: one label, the rest behind a "+N".
+  const MAX_BADGES = 1;
 
   let el = $state<HTMLDivElement>();
   let searchEl = $state<HTMLInputElement>();
@@ -116,6 +117,14 @@
     </div>
   {/if}
 
+  <div class="cols">
+    <span class="refs">Branch / Tag</span>
+    {#if graphW}<span style:width="{graphW}px" class="c-graph">Graph</span>{/if}
+    <span class="subject">Commit message</span>
+    <span class="author">Author</span>
+    <span class="sha">SHA</span>
+    <span class="time"></span>
+  </div>
   <div class="scroll" bind:this={el} bind:clientHeight={height} onscroll={onScroll}>
     <div class="spacer" style:height="{repo.items.length * ROW}px">
       <div class="window" style:transform="translateY({start * ROW}px)">
@@ -123,6 +132,7 @@
           {#if item.type === 'wt'}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div class="row wt" class:sel={repo.selectedId === WT} onclick={() => pick(WT)}>
+              <span class="refs"></span>
               {#if graphW}
                 <svg width={graphW} height={ROW}>
                   <circle cx={x(0)} cy={MID} r="4" class="wt-node" />
@@ -139,29 +149,14 @@
               class="row commit"
               class:sel={repo.selectedId === c.id}
               style:--lane={color(c.graph.color)}
-              style:--nx="{graphW ? x(c.graph.lane) - 2 : 0}px"
+              style:--nx="{graphW ? x(c.graph.lane) : 0}px"
               onclick={() => pick(c.id)}
               oncontextmenu={(e) => {
                 pick(c.id);
                 app.openMenu(e, commitMenu(repo, c.id));
               }}
             >
-              <span class="lead">
-              {#if graphW}
-                <svg width={graphW} height={ROW}>
-                  {#each paths(c.graph) as p}
-                    <path d={p.d} stroke={p.color} />
-                  {/each}
-                  {#if c.parents.length > 1}
-                    <circle cx={x(c.graph.lane)} cy={MID} r="3" class="merge" stroke={color(c.graph.color)} />
-                  {:else}
-                    <circle cx={x(c.graph.lane)} cy={MID} r="3.5" fill={color(c.graph.color)} />
-                  {/if}
-                  {#if c.id === repo.head}
-                    <circle cx={x(c.graph.lane)} cy={MID} r="6" class="head-ring" stroke={color(c.graph.color)} />
-                  {/if}
-                </svg>
-              {/if}
+              <span class="refs">
               {#if badges}
                 <span class="badges">
                   {#each badges.slice(0, MAX_BADGES) as b}
@@ -182,11 +177,37 @@
                     </span>
                   {/each}
                   {#if badges.length > MAX_BADGES}
-                    <span class="badge tag" title={badges.slice(MAX_BADGES).map((b) => b.label).join(', ')}
-                      >+{badges.length - MAX_BADGES}</span
+                    <button
+                      class="more"
+                      title="{badges.slice(MAX_BADGES).map((b) => b.label).join(', ')} — click to see all and switch"
+                      onclick={(e) => {
+                        pick(c.id);
+                        app.openMenu(e, refsOnCommitMenu(repo, badges));
+                      }}>+{badges.length - MAX_BADGES}</button
                     >
                   {/if}
                 </span>
+                <span class="wire"></span>
+              {/if}
+              </span>
+              <span class="lead" style:width="{graphW}px">
+              {#if graphW}
+                <svg width={graphW} height={ROW}>
+                  {#if badges}
+                    <path d="M0 {MID}H{x(c.graph.lane)}" stroke={color(c.graph.color)} class="wire-in" />
+                  {/if}
+                  {#each paths(c.graph) as p}
+                    <path d={p.d} stroke={p.color} />
+                  {/each}
+                  {#if c.parents.length > 1}
+                    <circle cx={x(c.graph.lane)} cy={MID} r="3" class="merge" stroke={color(c.graph.color)} />
+                  {:else}
+                    <circle cx={x(c.graph.lane)} cy={MID} r="3.5" fill={color(c.graph.color)} />
+                  {/if}
+                  {#if c.id === repo.head}
+                    <circle cx={x(c.graph.lane)} cy={MID} r="6" class="head-ring" stroke={color(c.graph.color)} />
+                  {/if}
+                </svg>
               {/if}
               </span>
               <span class="subject truncate" class:is-merge={c.parents.length > 1}>{c.subject}</span>
@@ -252,22 +273,68 @@
     border-left: 2px solid transparent;
   }
   /* Each commit carries a band in its branch colour, starting at its node. */
-  .lead {
+  /* First column: branch and tag labels, wired to their commit. */
+  .refs {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
+    width: var(--refs-w);
     flex: none;
-    max-width: 55%;
     min-width: 0;
+    height: 100%;
+    padding-left: 8px;
+    /* cancel the row gap so the wire runs straight into the graph */
+    margin-right: -8px;
+  }
+  .wire {
+    flex: 1;
+    min-width: 6px;
+    height: 0;
+    border-top: 1.2px solid var(--lane);
+    opacity: 0.55;
+  }
+  .wire-in {
+    stroke-width: 1.2;
+    opacity: 0.55;
+  }
+  /* Graph column: a band in the branch colour from the node to the column's end. */
+  .lead {
+    flex: none;
     height: 20px;
-    padding-right: 6px;
-    border-radius: 0 5px 5px 0;
+    border-radius: 0 4px 4px 0;
     background-image: linear-gradient(
       90deg,
       transparent var(--nx),
-      color-mix(in srgb, var(--lane) 20%, transparent) var(--nx),
-      color-mix(in srgb, var(--lane) 9%, transparent) 100%
+      color-mix(in srgb, var(--lane) 22%, transparent) var(--nx),
+      color-mix(in srgb, var(--lane) 12%, transparent) 100%
     );
+  }
+  .cols {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 24px;
+    padding: 0 22px 0 2px;
+    flex: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .cols .c-graph {
+    flex: none;
+    padding-left: 10px;
+    overflow: hidden;
+  }
+  .cols .author,
+  .cols .sha {
+    font-size: 10.5px;
+    color: var(--text-faint);
+  }
+  .cols .sha {
+    width: 50px;
   }
   .lead svg {
     margin-block: -3px;
@@ -285,7 +352,6 @@
   svg {
     flex: none;
     display: block;
-    margin-left: -2px;
   }
   path {
     fill: none;
@@ -306,11 +372,11 @@
     stroke-width: 1.6;
     stroke-dasharray: 2.5 2;
   }
-  .row:not(:has(svg)) {
-    padding-left: 12px;
-  }
-  .row:not(:has(svg)) .lead:empty {
+  .row:not(:has(svg)) .wire {
     display: none;
+  }
+  .row:not(:has(svg)) .refs {
+    margin-right: 0;
   }
   .subject {
     flex: 1;
@@ -354,11 +420,14 @@
     flex: 0 1 auto;
     min-width: 0;
   }
+  .graph {
+    --refs-w: 190px;
+  }
   .badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    max-width: 180px;
+    max-width: 100%;
     min-width: 0;
     height: 18px;
     padding: 0 6px;
@@ -390,6 +459,18 @@
   .badge.branch:not(.head):hover {
     background: color-mix(in srgb, var(--lane) 28%, transparent);
   }
+  .more {
+    flex: none;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--lane);
+    border: 1px solid color-mix(in srgb, var(--lane) 35%, transparent);
+  }
+  .more:hover {
+    background: color-mix(in srgb, var(--lane) 22%, transparent);
+  }
   .badge.tag {
     background: transparent;
     border-color: transparent;
@@ -416,6 +497,9 @@
   @container (max-width: 640px) {
     .sha {
       display: none;
+    }
+    .refs {
+      width: 120px;
     }
   }
   @container (max-width: 480px) {

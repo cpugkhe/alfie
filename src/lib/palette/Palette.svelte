@@ -3,7 +3,7 @@
   import { commands } from '$lib/keys/commands';
   import { formatKeys } from '$lib/keys/keymap';
   import { fuzzy, tildify } from '$lib/util';
-  import { checkoutRef, mergeRef, newBranch, rebaseOnto } from '$lib/actions';
+  import { checkoutRef, mergeRef, newBranch, rebaseOnto, setBase } from '$lib/actions';
 
   interface Item {
     id: string;
@@ -161,17 +161,21 @@
   }
 
   /** Branches and tags to merge in, or to rebase onto. */
-  function targetItems(kind: 'merge' | 'rebase'): Item[] {
+  function targetItems(kind: 'merge' | 'rebase' | 'base'): Item[] {
     const repo = app.active;
     if (!repo) return [];
     const current = repo.status?.branch;
     return repo.refs
       .filter((r) => !(r.kind === 'local' && r.short === current) && (kind === 'merge' || r.kind !== 'tag'))
+      // A remote branch that already has a local twin adds nothing as a base.
+      .filter((r) => kind !== 'base' || r.kind === 'local' || !repo.refs.some((l) => l.kind === 'local' && l.upstream === r.short))
       .map((ref) => ({
         id: ref.name,
         title: ref.short,
         group: ref.kind === 'local' ? 'Local branches' : ref.kind === 'remote' ? 'Remote branches' : 'Tags',
-        run: () => (kind === 'merge' ? mergeRef(repo, ref.short) : rebaseOnto(repo, ref.short)),
+        detail: kind === 'base' && ref.short === repo.base.name ? 'current base' : undefined,
+        run: () =>
+          kind === 'merge' ? mergeRef(repo, ref.short) : kind === 'rebase' ? rebaseOnto(repo, ref.short) : setBase(repo, ref.short),
       }));
   }
 
@@ -235,7 +239,7 @@
           ? branchItems(q)
           : mode === 'profiles'
             ? profileItems()
-            : mode === 'merge' || mode === 'rebase'
+            : mode === 'merge' || mode === 'rebase' || mode === 'base'
               ? targetItems(mode)
             : commandItems();
     if (!q) return all;
@@ -320,6 +324,8 @@
                 ? `Merge into ${app.active?.status?.branch ?? 'HEAD'}…`
                 : mode === 'rebase'
                   ? `Rebase ${app.active?.status?.branch ?? 'HEAD'} onto…`
+                  : mode === 'base'
+                    ? `Which branch does ${app.active?.status?.branch ?? 'this branch'} come from?`
               : 'Run a command…'}
         spellcheck="false"
         autocomplete="off"

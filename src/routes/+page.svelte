@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import '../app.css';
   import { app } from '$lib/state/app.svelte';
+  import { api } from '$lib/api';
   import { installKeymap } from '$lib/keys/keymap';
   import { activeScopes, commands, menuAction } from '$lib/keys/commands';
   import TabBar from '$lib/components/TabBar.svelte';
@@ -52,6 +53,14 @@
   });
 
   const split = $derived(app.secondary ? app.space.split : null);
+
+  $effect(() => {
+    const repo = app.active;
+    if (!repo) return;
+    untrack(() => {
+      if (!repo.op && repo.canWrite()) void repo.run('Fetching…', () => api.fetch(repo.path));
+    });
+  });
 
   $effect(() => {
     const request = app.confirmation;

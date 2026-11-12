@@ -732,7 +732,7 @@ export const commands: Command[] = [
   {
     id: 'side.favorite',
     title: 'Add / remove favorite',
-    keys: ['f'],
+    keys: ['alt+f'],
     scope: 'sidebar',
     hidden: true,
     when: () => !!sidebarRef() && sidebarRef()?.kind !== 'tag',

@@ -60,8 +60,8 @@ pub fn repo_refs(repo: String) -> Result<refs::RefList, String> {
 }
 
 #[tauri::command(async)]
-pub fn repo_log(repo: String, limit: usize, scope: String) -> Result<log::LogPage, String> {
-    log::load(&repo, limit, &scope)
+pub fn repo_log(repo: String, limit: usize, scope: String, branch: Option<String>) -> Result<log::LogPage, String> {
+    log::load_branch(&repo, limit, &scope, branch.as_deref())
 }
 
 #[tauri::command(async)]
@@ -147,6 +147,21 @@ pub fn last_message(repo: String) -> Result<String, String> {
 #[tauri::command(async)]
 pub fn checkout(repo: String, target: String, kind: String) -> Result<(), String> {
     ops::checkout(&repo, &target, &kind)
+}
+
+#[tauri::command(async)]
+pub fn checkout_remote(repo: String, name: String, expected: Option<String>) -> Result<Option<String>, String> {
+    ops::checkout_remote(&repo, &name, expected.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn push_branch(repo: String, name: String) -> Result<(), String> {
+    ops::push_branch(&repo, &name)
+}
+
+#[tauri::command(async)]
+pub fn delete_remote_branch(repo: String, name: String) -> Result<(), String> {
+    ops::delete_remote_branch(&repo, &name)
 }
 
 #[tauri::command(async)]

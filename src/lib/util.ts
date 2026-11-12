@@ -60,3 +60,33 @@ export function tildify(path: string): string {
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
+
+/** Newest version first; short versions and a leading v are accepted for tags. */
+export function compareTags(a: string, b: string): number {
+  const version = /^v?(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/;
+  const av = version.exec(a);
+  const bv = version.exec(b);
+  if (!av || !bv) return av ? -1 : bv ? 1 : b.localeCompare(a, undefined, { numeric: true });
+  for (let i = 1; i <= 3; i++) {
+    const x = BigInt(av[i] ?? '0');
+    const y = BigInt(bv[i] ?? '0');
+    if (x !== y) return x > y ? -1 : 1;
+  }
+  if (!av[4] || !bv[4]) return av[4] ? 1 : bv[4] ? -1 : a.localeCompare(b);
+  const ap = av[4].split('.');
+  const bp = bv[4].split('.');
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const x = ap[i];
+    const y = bp[i];
+    if (x === y) continue;
+    if (x === undefined) return 1;
+    if (y === undefined) return -1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) {
+      if (BigInt(x) !== BigInt(y)) return BigInt(x) > BigInt(y) ? -1 : 1;
+    } else if (xn !== yn) return xn ? 1 : -1;
+    else return x > y ? -1 : 1;
+  }
+  return a.localeCompare(b);
+}

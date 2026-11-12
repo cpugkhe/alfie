@@ -436,6 +436,121 @@ fn with_origin() -> (Repo, Repo) {
 }
 
 #[test]
+fn remote_checkout_fetches_and_fast_forwards_an_existing_branch() {
+    let (origin, r) = with_origin();
+    origin.write("first.txt", "first\n");
+    origin.commit_all("first remote work");
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), None);
+    assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
+    ops::create_branch(r.path(), "topic", None, true).unwrap();
+    origin.write("remote.txt", "latest\n");
+    origin.commit_all("remote work");
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), None);
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+    assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
+    assert_eq!(r.read("remote.txt"), "latest\n");
+}
+
+#[test]
+fn remote_checkout_keeps_staging_when_already_up_to_date() {
+    let (_origin, r) = with_origin();
+    r.write("a.txt", "staged\n");
+    ops::stage_all(r.path()).unwrap();
+    let staged = r.sh(&["diff", "--cached"]);
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), None);
+    assert_eq!(r.sh(&["diff", "--cached"]), staged);
+    assert_eq!(r.read("a.txt"), "staged\n");
+}
+
+#[test]
+fn remote_checkout_creates_a_tracking_branch_with_slashes_in_remote_and_branch_names() {
+    let (origin, r) = with_origin();
+    r.sh(&["remote", "rename", "origin", "up/stream"]);
+    ops::create_branch(origin.path(), "feature/new", None, false).unwrap();
+    assert_eq!(ops::checkout_remote(r.path(), "up/stream/feature/new", None).unwrap(), None);
+    let status = status::load(r.path()).unwrap();
+    assert_eq!(status.branch.as_deref(), Some("feature/new"));
+    assert_eq!(status.upstream.as_deref(), Some("up/stream/feature/new"));
+}
+
+#[test]
+fn remote_branch_history_is_available_before_the_first_checkout() {
+    let origin = Repo::new();
+    origin.write("a.txt", "one\n");
+    origin.commit_all("init");
+    let r = Repo::new();
+    r.sh(&["remote", "add", "origin", origin.path()]);
+    ops::fetch(r.path()).unwrap();
+    let page = log::load_branch(r.path(), 10, "all", Some("refs/remotes/origin/main")).unwrap();
+    assert_eq!(page.commits.len(), 1);
+    assert!(page.head.is_none());
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), None);
+    assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
+}
+
+#[test]
+fn remote_checkout_requires_approval_for_ahead_and_diverged_branches() {
+    let (origin, r) = with_origin();
+    r.write("local.txt", "local\n");
+    r.commit_all("local only");
+    let local = log::head_oid(r.path()).unwrap();
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), Some(local.clone()));
+    assert_eq!(log::head_oid(r.path()).as_deref(), Some(local.as_str()));
+    origin.write("remote.txt", "remote\n");
+    origin.commit_all("remote only");
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", Some("stale")).unwrap(), Some(local.clone()));
+    r.write("a.txt", "unsaved\n");
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", Some(&local)).unwrap(), None);
+    assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
+    assert_eq!(r.read("a.txt"), "unsaved\n");
+}
+
+#[test]
+fn remote_checkout_protects_conflicting_uncommitted_work() {
+    let (origin, r) = with_origin();
+    origin.write("a.txt", "remote\n");
+    origin.commit_all("remote edit");
+    let before = log::head_oid(r.path());
+    r.write("a.txt", "unsaved\n");
+    assert!(ops::checkout_remote(r.path(), "origin/main", None).is_err());
+    assert_eq!(r.read("a.txt"), "unsaved\n");
+    assert_eq!(log::head_oid(r.path()), before);
+}
+
+#[test]
+fn remote_branches_can_be_created_and_deleted_without_checkout() {
+    let (origin, r) = with_origin();
+    ops::create_branch(r.path(), "feature/new", None, false).unwrap();
+    ops::push_branch(r.path(), "feature/new").unwrap();
+    assert_eq!(origin.sh(&["rev-parse", "refs/heads/feature/new"]), r.sh(&["rev-parse", "refs/heads/feature/new"]));
+    ops::delete_remote_branch(r.path(), "origin/feature/new").unwrap();
+    assert!(!origin.sh(&["branch", "--list", "feature/new"]).contains("feature/new"));
+    assert!(r.sh(&["branch", "--list", "feature/new"]).contains("feature/new"));
+    assert!(!refs::load(r.path()).unwrap().refs.iter().any(|x| x.short == "origin/feature/new"));
+    assert!(ops::push_branch(r.path(), "--all").is_err());
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+}
+
+#[test]
+fn branch_history_excludes_other_branches_and_pages_normally() {
+    let (_, r) = with_origin();
+    let main = log::head_oid(r.path()).unwrap();
+    ops::create_branch(r.path(), "topic", None, true).unwrap();
+    r.write("topic.txt", "topic\n");
+    r.commit_all("topic work");
+    let topic = log::head_oid(r.path()).unwrap();
+    let main_log = log::load_branch(r.path(), 10, "all", Some("refs/heads/main")).unwrap();
+    assert_eq!(main_log.commits.len(), 1);
+    assert_eq!(main_log.commits[0].id, main);
+    assert_eq!(main_log.head.as_deref(), Some(topic.as_str()));
+    let page = log::load_branch(r.path(), 1, "all", Some("refs/heads/topic")).unwrap();
+    assert!(page.has_more);
+    assert_eq!(page.commits[0].id, topic);
+    assert_eq!(log::load_branch(r.path(), 10, "all", Some("refs/remotes/origin/main")).unwrap().commits.len(), 1);
+    assert!(log::load_branch(r.path(), 10, "all", Some("--all")).is_err());
+}
+
+#[test]
 fn update_branch_fast_forwards_without_checkout() {
     let (origin, r) = with_origin();
     ops::create_branch(r.path(), "feature", None, true).unwrap();

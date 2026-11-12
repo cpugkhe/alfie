@@ -26,7 +26,7 @@
   function choose(i: number) {
     const item = app.menu?.items[i];
     close();
-    item?.run();
+    if (item && !item.disabled) item.run();
   }
 
   function onKey(e: KeyboardEvent) {
@@ -50,6 +50,9 @@
   <div class="backdrop" onmousedown={close} oncontextmenu={(e) => { e.preventDefault(); close(); }}></div>
   <div class="menu" role="menu" bind:this={el} style:left="{pos.x}px" style:top="{pos.y}px">
     {#each app.menu.items as item, i}
+      {#if item.group && item.group !== app.menu.items[i - 1]?.group}
+        <div class="group" role="presentation">{item.group}</div>
+      {/if}
       <button
         role="menuitem"
         class:sel={i === index}
@@ -78,8 +81,23 @@
     padding: 4px;
     background: var(--raised);
     border: 1px solid var(--border-strong);
-    border-radius: 8px;
+    border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    max-height: calc(100vh - 8px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .group {
+    padding: 7px 10px 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .group:not(:first-child) {
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
   }
   button {
     display: flex;
@@ -94,6 +112,10 @@
   }
   button.sel {
     background: var(--select);
+  }
+  button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
   .label {
     flex: 1;

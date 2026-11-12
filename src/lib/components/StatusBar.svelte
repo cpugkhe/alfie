@@ -37,7 +37,9 @@
     >
       {repo.profile.profile?.name ?? 'no profile'}{#if repo.profile.auto}<span class="faint"> auto</span>{/if}
     </button>
-    {#if SCOPE_LABEL[repo.scope]}
+    {#if repo.historyRef}
+      <span class="pill truncate">{repo.historyRef.replace(/^refs\/(heads|remotes)\//, '')} history</span>
+    {:else if SCOPE_LABEL[repo.scope]}
       <span class="pill">{SCOPE_LABEL[repo.scope]}</span>
     {/if}
     {#if repo.op}

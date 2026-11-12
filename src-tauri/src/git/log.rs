@@ -36,13 +36,24 @@ pub fn head_oid(repo: &str) -> Option<String> {
 /// `scope`: "all" (every branch, remote and tag), "local" (no remote-only
 /// branches) or "current" (HEAD only).
 pub fn load(repo: &str, limit: usize, scope: &str) -> Result<LogPage, String> {
-    let Some(head) = head_oid(repo) else {
+    load_branch(repo, limit, scope, None)
+}
+
+pub fn load_branch(repo: &str, limit: usize, scope: &str, branch: Option<&str>) -> Result<LogPage, String> {
+    if let Some(branch) = branch {
+        if !branch.starts_with("refs/heads/") && !branch.starts_with("refs/remotes/") {
+            return Err("History requires a local or remote branch".into());
+        }
+        git(repo, &["show-ref", "--verify", branch])?;
+    }
+    let head = head_oid(repo);
+    if head.is_none() && branch.is_none() {
         return Ok(LogPage {
             commits: vec![],
             has_more: false,
             head: None,
         });
-    };
+    }
 
     let mut cmd = Git::new(repo).args([
         "log".to_string(),
@@ -50,10 +61,14 @@ pub fn load(repo: &str, limit: usize, scope: &str) -> Result<LogPage, String> {
         format!("--max-count={}", limit + 1),
         "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e".to_string(),
     ]);
-    cmd = match scope {
-        "current" => cmd.arg("HEAD"),
-        "local" => cmd.args(["--branches", "--tags", "HEAD"]),
-        _ => cmd.args(["--exclude=refs/stash", "--all", "HEAD"]),
+    cmd = if let Some(branch) = branch {
+        cmd.arg(branch)
+    } else {
+        match scope {
+            "current" => cmd.arg("HEAD"),
+            "local" => cmd.args(["--branches", "--tags", "HEAD"]),
+            _ => cmd.args(["--exclude=refs/stash", "--all", "HEAD"]),
+        }
     };
     let out = cmd.arg("--").run()?.stdout;
 
@@ -66,7 +81,7 @@ pub fn load(repo: &str, limit: usize, scope: &str) -> Result<LogPage, String> {
             .iter()
             .map(|c| (c.id.as_str(), c.parents.iter().map(String::as_str).collect()))
             .collect();
-        graph::layout(&input, Some(&head))
+        graph::layout(&input, head.as_deref())
     };
     for (c, row) in commits.iter_mut().zip(rows) {
         c.graph = row;
@@ -75,7 +90,7 @@ pub fn load(repo: &str, limit: usize, scope: &str) -> Result<LogPage, String> {
     Ok(LogPage {
         commits,
         has_more,
-        head: Some(head),
+        head,
     })
 }
 

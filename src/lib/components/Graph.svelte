@@ -3,7 +3,7 @@
   import { WT, type RepoState } from '$lib/state/repo.svelte';
   import type { GraphRow } from '$lib/api';
   import { relTime } from '$lib/util';
-  import { checkoutRef, commitMenu, refsOnCommitMenu } from '$lib/actions';
+  import { checkoutRef, commitMenu, refMenu, refsOnCommitMenu } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
 
   let { repo }: { repo: RepoState } = $props();
@@ -96,6 +96,12 @@
 </script>
 
 <div class="graph" class:focused={repo.focus === 'graph'}>
+  {#if repo.historyRef || repo.scope !== 'all'}
+    <div class="history">
+      <span class="truncate">{repo.historyRef ? repo.historyRef.replace(/^refs\/(heads|remotes)\//, '') : repo.scope === 'current' ? 'Current branch' : 'Local branches'} history</span>
+      <button onclick={() => repo.setScope('all')}>Show all branches</button>
+    </div>
+  {/if}
   {#if repo.filterOpen || filtering}
     <div class="search">
       <span class="faint">Search</span>
@@ -167,6 +173,13 @@
                       title={b.ref
                         ? `${b.label}${b.synced ? ' (in sync with upstream)' : ''} — double-click to check out`
                         : b.label}
+                      oncontextmenu={(e) => {
+                        const ref = repo.refs.find((r) => b.ref ? r.short === b.ref.short && r.kind === b.ref.kind : r.kind === 'tag' && r.short === b.label);
+                        if (!ref) return;
+                        e.stopPropagation();
+                        pick(c.id);
+                        app.openMenu(e, refMenu(repo, ref, b.kind === 'head'));
+                      }}
                       ondblclick={(e) => {
                         if (!b.ref || b.kind === 'head') return;
                         e.stopPropagation();
@@ -229,6 +242,36 @@
 </div>
 
 <style>
+  .history {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    flex: none;
+    min-height: 34px;
+  }
+  .history > span { min-width: 0; }
+  .history button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .history button {
+    color: var(--text-dim);
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--radius);
+    flex: none;
+  }
+  @media (hover: hover) {
+    .history button:hover { background: var(--hover); color: var(--text); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .history button { transition: scale 150ms ease-out; }
+    .history button:active { scale: 0.96; }
+  }
   .graph {
     display: flex;
     flex-direction: column;

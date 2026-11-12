@@ -325,10 +325,9 @@ fn default_remote(repo: &str) -> Result<String, String> {
 }
 
 pub fn push_tag(repo: &str, name: &str) -> Result<(), String> {
-    let remote = default_remote(repo)?;
     done(
         w(repo)
-            .args(["push".to_string(), "-q".to_string(), remote, format!("refs/tags/{name}")])
+            .args(["push".to_string(), "-q".to_string(), "origin".to_string(), format!("refs/tags/{name}:refs/tags/{name}")])
             .run(),
     )
 }
@@ -352,6 +351,46 @@ pub fn delete_remote_tag(repo: &str, name: &str) -> Result<(), String> {
 }
 
 // ---------- branches ----------
+
+pub fn push_branch(repo: &str, name: &str) -> Result<(), String> {
+    git(repo, &["check-ref-format", "--branch", name])?;
+    done(w(repo).args(["push", "-q", "-u", "origin", &format!("refs/heads/{name}:refs/heads/{name}")]).run())
+}
+
+pub fn delete_remote_branch(repo: &str, name: &str) -> Result<(), String> {
+    let (remote, branch) = split_remote(repo, name).ok_or("No such remote branch")?;
+    git(repo, &["check-ref-format", &format!("refs/heads/{branch}")])?;
+    done(w(repo).args(["push", "-q", "--delete", "--", &remote, &format!("refs/heads/{branch}")]).run())?;
+    done(w(repo).args(["fetch", "-q", "--prune", "--", &remote]).run())
+}
+
+/// Returns the local tip needing reset approval, without switching branches.
+/// Approval is tied to that tip; `reset --keep` protects uncommitted work.
+pub fn checkout_remote(repo: &str, name: &str, expected: Option<&str>) -> Result<Option<String>, String> {
+    let (remote, branch) = split_remote(repo, name).ok_or("No such remote branch")?;
+    git(repo, &["check-ref-format", "--branch", &branch])?;
+    let remote_ref = format!("refs/remotes/{name}");
+    done(w(repo).args(["fetch", "-q", "--", &remote, &format!("+refs/heads/{branch}:{remote_ref}")]).run())?;
+    let target = git(repo, &["rev-parse", "--verify", &remote_ref])?.trim().to_string();
+    if !local_exists(repo, &branch) {
+        done(w(repo).args(["checkout", "-q", "-b", &branch, "--track", &remote_ref, "--"]).run())?;
+        return Ok(None);
+    }
+    let local_ref = format!("refs/heads/{branch}");
+    let before = git(repo, &["rev-parse", "--verify", &local_ref])?.trim().to_string();
+    let ahead = git(repo, &["rev-list", "--count", &format!("{target}..{before}")])?;
+    if ahead.trim() != "0" && expected != Some(before.as_str()) {
+        return Ok(Some(before));
+    }
+    done(w(repo).args(["checkout", "-q", &branch, "--"]).run())?;
+    if ahead.trim() == "0" {
+        done(w(repo).args(["merge", "--ff-only", "-q", &target, "--"]).run())?;
+    } else {
+        reset(repo, &target, "keep")?;
+    }
+    done(w(repo).args(["branch", "--set-upstream-to", &remote_ref, "--", &branch]).run())?;
+    Ok(None)
+}
 
 fn local_exists(repo: &str, name: &str) -> bool {
     git(

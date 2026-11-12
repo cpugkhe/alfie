@@ -39,6 +39,7 @@ export interface Dialog {
 
 export interface MenuItem {
   label: string;
+  group?: string;
   /** Small note on the right, e.g. "current". */
   hint?: string;
   disabled?: boolean;

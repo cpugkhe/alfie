@@ -42,6 +42,7 @@ function press(combo: string) {
       metaKey: parts.includes('mod'),
       shiftKey: parts.includes('shift'),
       ctrlKey: parts.includes('ctrl'),
+      altKey: parts.includes('alt'),
       bubbles: true,
       cancelable: true,
     }),
@@ -76,7 +77,20 @@ export function install() {
               : r,
       ),
     }),
-    repo_log: () => f.log,
+    repo_log: ({ branch, scope, limit }) => {
+      if (!branch && scope !== 'current') return f.log;
+      const tip = branch ? f.refs.refs.find((r: any) => r.name === branch)?.target : f.log.head;
+      const ancestors = new Set<string>();
+      const pending = [tip];
+      while (pending.length) {
+        const id = pending.pop();
+        if (!id || ancestors.has(id)) continue;
+        ancestors.add(id);
+        pending.push(...(f.log.commits.find((c: any) => c.id === id)?.parents ?? []));
+      }
+      const commits = f.log.commits.filter((c: any) => ancestors.has(c.id));
+      return { ...f.log, commits: commits.slice(0, limit), hasMore: commits.length > limit };
+    },
     commit_detail: ({ sha }) => f.details[sha],
     diff_file: ({ target, path }) =>
       f.diffs[target.kind === 'commit' ? `commit:${target.sha}:${path}` : `${target.kind}:${path}`],
@@ -111,6 +125,7 @@ export function install() {
       [
         'stage', 'unstage', 'stage_all', 'unstage_all', 'discard', 'apply_hunk', 'commit', 'checkout',
         'create_branch', 'delete_branch', 'rename_branch', 'stash_push', 'stash_action', 'fetch', 'pull', 'push',
+        'checkout_remote', 'push_branch', 'delete_remote_branch',
       ].map((cmd) => [cmd, () => null]),
     ),
     'plugin:event|listen': () => 1,

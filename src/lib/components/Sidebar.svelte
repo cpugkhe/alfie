@@ -64,14 +64,18 @@
           }}>+ New</button
         >
       {/if}
-      <button
-        class="sort"
-        title="Sorted by {item.sort === 'name' ? 'name' : 'most recent commit'} — click or press O to change"
-        onclick={(e) => sort(e, item.key)}>{item.sort === 'name' ? 'A–Z' : 'Recent'}</button
-      >
+      {#if item.key === 'tag'}
+        <span class="sort version" title="Semantic version, newest first">Version ↓</span>
+      {:else}
+        <button
+          class="sort"
+          title="Sorted by {item.sort === 'name' ? 'name' : 'most recent commit'} — click or press O to change"
+          onclick={(e) => sort(e, item.key)}>{item.sort === 'name' ? 'A–Z' : 'Recent'}</button
+        >
+      {/if}
     </div>
     {#if item.key === 'favorite' && !item.collapsed && !g.rows.length}
-      <div class="hint">Press <kbd>F</kbd> on a branch, or click its ☆, to keep it here.</div>
+      <div class="hint">Press <kbd>⌥F</kbd> on a branch, or click its ☆, to keep it here.</div>
     {/if}
     {#if g.rows.length}
       <!-- At most ten rows tall; longer sections scroll on their own. -->
@@ -99,7 +103,7 @@
                 <button
                   class="act star"
                   class:on={row.item.fav}
-                  title={row.item.fav ? 'Remove from favorites (F)' : 'Add to favorites (F)'}
+                  title={row.item.fav ? 'Remove from favorites (⌥F)' : 'Add to favorites (⌥F)'}
                   onclick={(e) => {
                     e.stopPropagation();
                     toggleFavorite(repo, ref);
@@ -206,6 +210,7 @@
     background: var(--border-strong);
     color: var(--text);
   }
+  .sort.version { visibility: visible; }
   .rows {
     /* ten 24px rows */
     max-height: 240px;

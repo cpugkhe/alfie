@@ -3,7 +3,7 @@
  * `repo.run` (one write at a time, errors toasted, state reloaded after).
  */
 import { api, type HunkAction, type Ref, type Stash } from '$lib/api';
-import { app } from '$lib/state/app.svelte';
+import { app, type MenuItem } from '$lib/state/app.svelte';
 import { WT, type FileEntry, type RepoState, type UndoEntry } from '$lib/state/repo.svelte';
 
 const p = (repo: RepoState) => repo.path;
@@ -218,15 +218,32 @@ export async function commit(repo: RepoState, thenPush = false) {
 // ---------- branches ----------
 
 export async function checkoutRef(repo: RepoState, ref: Pick<Ref, 'short' | 'kind'>) {
-  const go = () => api.checkout(p(repo), ref.short, ref.kind);
+  let cancelled = false;
+  let approved: string | null = null;
+  const go = async () => {
+    if (ref.kind !== 'remote') return api.checkout(p(repo), ref.short, ref.kind);
+    const ahead = await api.checkoutRemote(p(repo), ref.short, approved);
+    if (!ahead) return;
+    const ok = await app.confirm({
+      title: `Reset local branch to ${ref.short}?`,
+      body: `The local branch has commits missing from ${ref.short}. Resetting removes those commits from the branch and matches the latest remote commit. Uncommitted changes are kept; conflicting changes must be stashed first.`,
+      confirmLabel: 'Reset to remote',
+      danger: true,
+    });
+    if (!ok) { cancelled = true; return; }
+    approved = ahead;
+    const changed = await api.checkoutRemote(p(repo), ref.short, ahead);
+    if (changed) throw new Error('The local branch changed while confirming. Try again to review the reset.');
+  };
   const from = whereNow(repo);
   const landed = () => {
+    if (cancelled) return;
     record(repo, { kind: 'checkout', label: `checkout ${ref.short}`, from, to: whereNow(repo) });
     repo.jumpToHead();
   };
   const err = await repo.run(`Checking out ${ref.short}…`, go, { quiet: true });
   if (!err) return landed();
-  if (!/would be overwritten|commit your changes or stash/i.test(err)) {
+  if (!/would be overwritten|commit your changes or stash|not uptodate|cannot merge/i.test(err)) {
     repo.notify(err, 'error');
     return;
   }
@@ -281,8 +298,15 @@ export async function renameBranch(repo: RepoState, ref: Ref) {
 }
 
 export async function deleteBranch(repo: RepoState, ref: Ref) {
-  if (ref.kind !== 'local') {
-    repo.notify('Only local branches can be deleted here.', 'error');
+  if (ref.kind === 'tag') return;
+  if (ref.kind === 'remote') {
+    const ok = await app.confirm({
+      title: `Delete remote branch ${ref.short}?`,
+      body: 'Removes the branch from the remote for everyone. Your local branch is kept.',
+      confirmLabel: 'Delete remote branch',
+      danger: true,
+    });
+    if (ok) await repo.run('Deleting remote branch…', () => api.deleteRemoteBranch(p(repo), ref.short));
     return;
   }
   if (ref.short === repo.status?.branch) {
@@ -358,36 +382,53 @@ export function stashMenu(repo: RepoState, stash: Stash) {
 }
 
 export function refMenu(repo: RepoState, ref: Ref, current: boolean) {
-  const items: { label: string; danger?: boolean; run: () => void }[] = [];
-  if (ref.kind !== 'tag' && !current) items.push({ label: `Check out ${ref.short}`, run: () => void checkoutRef(repo, ref) });
-  if (ref.kind === 'tag') items.push({ label: 'Check out (detached)', run: () => void checkoutRef(repo, ref) });
+  const items: MenuItem[] = [];
+  if (!current) items.push({ group: 'Navigate', label: ref.kind === 'tag' ? 'Check out (detached)' : `Check out ${ref.short}`, run: () => void checkoutRef(repo, ref) });
   if (ref.kind !== 'tag') {
+    items.push({ group: 'Navigate', label: 'Show only this branch’s history', run: () => { repo.setScope('all', ref.name); repo.focus = 'graph'; } });
     items.push({
+      group: 'Favorites',
       label: repo.local.favorites.includes(ref.name) ? 'Remove from favorites' : 'Add to favorites',
+      hint: '⌥F',
       run: () => toggleFavorite(repo, ref),
     });
     if (ref.kind === 'remote' || ref.upstream) {
-      items.push({ label: 'Update to latest', run: () => void updateBranch(repo, ref) });
+      items.push({ group: 'Sync', label: 'Update to latest', run: () => void updateBranch(repo, ref) });
     }
+    if (ref.kind === 'local') items.push({ group: 'Sync', label: 'Push branch to origin', run: () => void repo.run('Pushing branch…', () => api.pushBranch(p(repo), ref.short)) });
   }
   const here = repo.status?.branch;
   if (!current && here) {
-    items.push({ label: `Merge ${ref.short} into ${here}`, run: () => void mergeRef(repo, ref.short) });
+    items.push({ group: 'Integrate', label: `Merge ${ref.short} into ${here}`, run: () => void mergeRef(repo, ref.short) });
     if (ref.kind !== 'tag') {
-      items.push({ label: `Rebase ${here} onto ${ref.short}…`, run: () => void rebaseOnto(repo, ref.short) });
+      items.push({ group: 'Integrate', label: `Rebase ${here} onto ${ref.short}…`, run: () => void rebaseOnto(repo, ref.short) });
     }
   }
-  items.push({ label: 'New branch from here…', run: () => void newBranch(repo, ref.short) });
+  items.push({ group: 'Create', label: 'New local branch from here…', run: () => void newBranch(repo, ref.short) });
+  if (ref.kind !== 'tag') items.push({ group: 'Create', label: 'New remote branch on origin…', run: () => void newRemoteBranch(repo, ref) });
   if (ref.kind === 'tag') {
-    items.push({ label: 'Push tag', run: () => void pushTag(repo, ref.short) });
-    items.push({ label: 'Delete tag (local)…', danger: true, run: () => void deleteTag(repo, ref.short) });
-    items.push({ label: 'Delete tag on remote…', danger: true, run: () => void deleteRemoteTag(repo, ref.short) });
+    items.push({ group: 'Sync', label: 'Push tag to origin', run: () => void pushTag(repo, ref.short) });
+    items.push({ group: 'Delete', label: 'Delete tag (local)…', danger: true, run: () => void deleteTag(repo, ref.short) });
+    items.push({ group: 'Delete', label: 'Delete tag on remote…', danger: true, run: () => void deleteRemoteTag(repo, ref.short) });
   }
   if (ref.kind === 'local') {
-    items.push({ label: 'Rename…', run: () => void renameBranch(repo, ref) });
-    if (!current) items.push({ label: 'Delete…', danger: true, run: () => void deleteBranch(repo, ref) });
+    items.push({ group: 'Manage', label: 'Rename…', run: () => void renameBranch(repo, ref) });
   }
+  if (ref.kind === 'remote' || (ref.kind === 'local' && !current)) items.push({ group: 'Delete', label: ref.kind === 'remote' ? 'Delete remote branch…' : 'Delete local branch…', danger: true, run: () => void deleteBranch(repo, ref) });
   return items;
+}
+
+export async function newRemoteBranch(repo: RepoState, ref: Ref) {
+  const name = (await app.prompt({ title: 'New remote branch on origin', body: `Starts at ${ref.short}. Creates a local branch too.`, placeholder: 'branch-name', confirmLabel: 'Create and push' }))?.trim();
+  if (!name) return;
+  await repo.run('Creating remote branch…', async () => {
+    await api.createBranch(p(repo), name, ref.name, false);
+    try {
+      await api.pushBranch(p(repo), name);
+    } catch (error) {
+      throw new Error(`Local branch ${name} was created, but pushing to origin failed: ${error}`);
+    }
+  });
 }
 
 export async function dropStash(repo: RepoState, stash: Stash) {

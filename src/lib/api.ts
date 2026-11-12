@@ -216,8 +216,8 @@ export const api = {
   repoOpen: (path: string) => invoke<RepoInfo>('repo_open', { path }),
   repoStatus: (repo: string) => invoke<RepoStatus>('repo_status', { repo }),
   repoRefs: (repo: string) => invoke<RefList>('repo_refs', { repo }),
-  repoLog: (repo: string, limit: number, scope: LogScope) =>
-    invoke<LogPage>('repo_log', { repo, limit, scope }),
+  repoLog: (repo: string, limit: number, scope: LogScope, branch: string | null = null) =>
+    invoke<LogPage>('repo_log', { repo, limit, scope, branch }),
   commitDetail: (repo: string, sha: string) =>
     invoke<CommitDetail>('commit_detail', { repo, sha }),
   diffFile: (repo: string, target: DiffTarget, path: string, origPath: string | null) =>
@@ -240,6 +240,10 @@ export const api = {
 
   checkout: (repo: string, target: string, kind: string) =>
     invoke<void>('checkout', { repo, target, kind }),
+  checkoutRemote: (repo: string, name: string, expected: string | null = null) =>
+    invoke<string | null>('checkout_remote', { repo, name, expected }),
+  pushBranch: (repo: string, name: string) => invoke<void>('push_branch', { repo, name }),
+  deleteRemoteBranch: (repo: string, name: string) => invoke<void>('delete_remote_branch', { repo, name }),
   createBranch: (repo: string, name: string, start: string | null, checkout: boolean) =>
     invoke<void>('create_branch', { repo, name, start, checkout }),
   deleteBranch: (repo: string, name: string, force: boolean) =>

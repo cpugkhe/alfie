@@ -16,7 +16,7 @@ import {
   type Sections,
   type Stash,
 } from '$lib/api';
-import { clamp } from '$lib/util';
+import { clamp, compareTags } from '$lib/util';
 
 /** Id of the pinned "uncommitted changes" row. */
 export const WT = 'WT';
@@ -91,6 +91,7 @@ export class RepoState {
   hasMore = $state(false);
   head = $state<string | null>(null);
   scope = $state<LogScope>('all');
+  historyRef = $state<string | null>(null);
   limit = PAGE;
 
   loaded = $state(false);
@@ -256,7 +257,8 @@ export class RepoState {
     const section = (label: string, kind: Ref['kind']) => {
       const cfg = this.sections[kind];
       const list = this.refs.filter((r) => r.kind === kind);
-      if (cfg.sort === 'recent') list.sort((a, b) => b.time - a.time || a.short.localeCompare(b.short));
+      if (kind === 'tag') list.sort((a, b) => compareTags(a.short, b.short));
+      else if (cfg.sort === 'recent') list.sort((a, b) => b.time - a.time || a.short.localeCompare(b.short));
       else list.sort((a, b) => a.short.localeCompare(b.short));
       out.push({ type: 'header', key: kind, label, count: list.length, collapsed: cfg.collapsed, sort: cfg.sort });
       if (cfg.collapsed) return;
@@ -418,7 +420,7 @@ export class RepoState {
         const [status, refs, log, profile, remote] = await Promise.all([
           api.repoStatus(this.path),
           api.repoRefs(this.path),
-          api.repoLog(this.path, this.limit, this.scope),
+          api.repoLog(this.path, this.limit, this.scope, this.historyRef),
           api.profileFor(this.path),
           api.repoRemote(this.path).catch(() => null),
         ]);
@@ -505,9 +507,12 @@ export class RepoState {
     await this.refresh();
   }
 
-  setScope(scope: LogScope) {
-    if (this.scope === scope) return;
+  setScope(scope: LogScope, branch: string | null = null) {
+    if (this.scope === scope && this.historyRef === branch) return;
     this.scope = scope;
+    this.historyRef = branch;
+    this.limit = PAGE;
+    this.graphScroll = 0;
     this.refresh();
   }
 
@@ -611,6 +616,7 @@ export class RepoState {
   }
 
   cycleSort(key: SectionKey) {
+    if (key === 'tag') return;
     this.sections[key].sort = this.sections[key].sort === 'name' ? 'recent' : 'name';
   }
 

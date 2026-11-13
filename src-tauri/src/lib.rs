@@ -1,5 +1,6 @@
 mod commands;
 pub mod git;
+mod github;
 pub mod profiles;
 mod session;
 mod watcher;
@@ -13,6 +14,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(watcher::Watchers::default())
+        .manage(github::Login::default())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let _ = window.state::<github::Login>().cancel();
+            }
+        })
         .setup(|app| {
             if let Ok(dir) = app.path().app_config_dir() {
                 profiles::init(dir);
@@ -67,6 +74,10 @@ pub fn run() {
             commands::repo_open,
             commands::repo_status,
             commands::repo_refs,
+            commands::repo_pulls,
+            commands::github_status,
+            commands::github_login,
+            commands::github_cancel,
             commands::repo_log,
             commands::commit_detail,
             commands::stash_detail,

@@ -6,6 +6,7 @@
  * `#keys=mod+k,j,enter` in the URL replays key presses after load.
  */
 import fixture from './fixture.json';
+import type { GitHubConnection } from '$lib/api';
 
 const REPO = '/demo/acme-api';
 
@@ -55,7 +56,35 @@ export function install() {
   const originDemo = location.hash.includes('demoOrigin');
   const demoLocal = f.refs.refs.find((r: any) => r.short === 'hotfix/crash');
   const demoCurrent = f.refs.refs.find((r: any) => r.kind === 'local' && r.short === f.status.branch);
+  const githubAccounts = [{ login: 'demo', active: true }, { login: 'work-demo', active: false }];
+  let githubConnection: GitHubConnection = location.hash.includes('githubMissing')
+    ? { kind: 'missingCli' }
+    : location.hash.includes('githubSignedOut') ? { kind: 'signedOut', accounts: [] }
+    : location.hash.includes('githubError') ? { kind: 'error', message: 'Couldn’t reach GitHub. Check your connection and try again.', accounts: githubAccounts }
+    : { kind: 'connected', login: 'demo', accounts: githubAccounts };
+  let finishLogin: ((value: unknown) => void) | null = null;
+  let loginTimer: ReturnType<typeof setTimeout> | undefined;
   const handlers: Record<string, (args: any) => unknown> = {
+    github_status: ({ account }) => githubConnection.kind === 'connected'
+      ? githubAccounts.some((saved) => saved.login === (account ?? 'demo'))
+        ? { kind: 'connected', login: account ?? 'demo', accounts: githubAccounts }
+        : { kind: 'signedOut', accounts: githubAccounts }
+      : githubConnection,
+    github_login: ({ onCode }) => new Promise((resolve) => {
+      finishLogin = resolve;
+      onCode.onmessage('ABCD-1234');
+      loginTimer = setTimeout(() => {
+        if (!githubAccounts.some((saved) => saved.login === 'new-demo')) githubAccounts.push({ login: 'new-demo', active: false });
+        githubConnection = { kind: 'connected', login: 'new-demo', accounts: githubAccounts };
+        finishLogin = null;
+        resolve(githubConnection);
+      }, 15_000);
+    }),
+    github_cancel: () => {
+      clearTimeout(loginTimer);
+      finishLogin?.({ kind: 'signedOut', accounts: githubAccounts });
+      finishLogin = null;
+    },
     session_load: () => ({
       spaces: [
         { name: 'Work', tabs: [REPO, '/demo/web-client', '/demo/infra'], active: 0, split: null },
@@ -68,6 +97,11 @@ export function install() {
     session_save: () => null,
     repo_open: ({ path }) => ({ path, name: path.slice(path.lastIndexOf('/') + 1) }),
     repo_status: () => f.status,
+    repo_pulls: () => githubConnection.kind === 'connected' ? ({
+      [`refs/heads/${f.status.branch}`]: { number: 42, url: 'https://github.com/acme/acme-api/pull/42' },
+      'refs/heads/feature/login': { number: 38, url: 'https://github.com/acme/acme-api/pull/38' },
+    }) : {},
+    'plugin:opener|open_url': ({ url }) => { window.open(url, '_blank', 'noopener,noreferrer'); },
     // Give a few branches an upstream so status chips can be previewed.
     repo_refs: () => ({
       ...f.refs,
@@ -157,7 +191,7 @@ export function install() {
     invoke: async (cmd: string, args: any) => {
       const handler = handlers[cmd];
       if (!handler) throw new Error(`mock: no handler for ${cmd}`);
-      return structuredClone(handler(args ?? {}));
+      return structuredClone(await handler(args ?? {}));
     },
     transformCallback: () => 0,
     metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },

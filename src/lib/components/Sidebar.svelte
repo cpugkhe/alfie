@@ -3,6 +3,7 @@
   import { activateSidebar, newBranch, refMenu, stashMenu, toggleFavorite, updateBranch } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
   import type { SectionKey } from '$lib/api';
+  import PullRequestLink from './PullRequestLink.svelte';
 
   let { repo }: { repo: RepoState } = $props();
   let el = $state<HTMLDivElement>();
@@ -87,6 +88,7 @@
         {#each g.rows as row (row.i)}
           {#if row.item.type === 'ref'}
             {@const ref = row.item.ref}
+            {@const pull = repo.pulls[ref.name]}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div
               class="item"
@@ -103,6 +105,7 @@
             >
               <span class="mark">{row.item.current ? '●' : ''}</span>
               <span class="label truncate">{ref.short}</span>
+              {#if pull}<PullRequestLink {pull} />{/if}
               {#if ref.kind !== 'tag'}
                 <button
                   class="act star"

@@ -21,6 +21,7 @@ Named after a tri-colour mini Aussie.
 - Fetch, pull, and push using your Git credentials or SSH profiles.
 - Organize repositories into tabs and spaces, with split views.
 - Navigate with keyboard shortcuts and a command palette.
+- Open a branch's GitHub pull request from its `PR #…` link in the sidebar or toolbar.
 
 ## Screenshots
 
@@ -55,7 +56,7 @@ Alfie has been tested on those platforms.
 
 ### Download for macOS
 
-Download [Alfie 0.1.0 for Apple Silicon](https://github.com/cpugkhe/alfie/releases/download/v0.1.0/Alfie_0.1.0_aarch64.dmg)
+Download [Alfie 0.2.0 for Apple Silicon](https://github.com/cpugkhe/alfie/releases/download/v0.2.0/Alfie_0.2.0_aarch64.dmg)
 from [GitHub Releases](https://github.com/cpugkhe/alfie/releases/latest).
 
 1. Open the downloaded `.dmg` file.
@@ -150,6 +151,28 @@ Alfie uses your existing Git configuration and credentials. Optional profiles
 let you select a Git identity and an SSH key per repository. Profiles store the
 key's path, not the private key itself. Unlock passphrase-protected keys through
 your SSH agent or macOS Keychain before use.
+
+PR links are optional and currently support open PRs (including drafts) on
+github.com. Click **Connect GitHub** in the status bar. Alfie detects an existing
+GitHub CLI login, guides installation if needed, and shows a one-time code for
+browser sign-in. Click **Copy code & open GitHub**, enter the code, and authorize
+GitHub CLI. The panel confirms your account and refreshes PR links automatically.
+Closing the panel cancels a pending sign-in.
+
+Choose **Account for this repository** to use a saved GitHub CLI account, or
+**Add account** to sign in to another. The choice is saved per repository,
+separately from commit/SSH profiles. **GitHub CLI default** follows the CLI's
+current authentication. Choosing an account leaves the CLI default unchanged;
+adding one restores the previous default after sign-in.
+
+You can also install [GitHub CLI](https://cli.github.com/) and run `gh auth login`
+in Terminal. Alfie reuses that login, separately from Git credentials and SSH
+profiles, and finds `gh` on the app's `PATH` or in standard macOS Homebrew locations.
+Alfie checks configured GitHub remotes,
+including fork PRs when the base repository is also a remote (usually `upstream`).
+Metadata refreshes on repository activity or app focus, at most once per minute.
+If `gh`, authentication, or the network is unavailable, PR links are hidden and
+local Git operations continue normally.
 
 | Shortcut | Action |
 | --- | --- |

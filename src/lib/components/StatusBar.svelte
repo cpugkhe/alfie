@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from '$lib/state/app.svelte';
+  import GitHubConnection from './GitHubConnection.svelte';
 
   const repo = $derived(app.active);
   const SCOPE_LABEL = { all: '', local: 'local branches', current: 'current branch only' };
@@ -52,6 +53,7 @@
     {/if}
   {/if}
   <span class="spacer"></span>
+  <GitHubConnection />
   <span class="zoom" title="Zoom (⌘+ / ⌘− / ⌘0)">
     <button onclick={() => app.setZoom(app.zoom - 0.1)} aria-label="Zoom out">−</button>
     <button class="pct" onclick={() => app.setZoom(1)}>{Math.round(app.zoom * 100)}%</button>
@@ -168,5 +170,8 @@
   kbd {
     font-size: 10px;
     padding: 1px 4px;
+  }
+  @media (max-width: 1000px) {
+    .hints { display: none; }
   }
 </style>

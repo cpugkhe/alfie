@@ -26,6 +26,22 @@ Avatar images omit the referrer. Unknown hosts use initials instead.
 
 Git synchronization contacts your configured remotes using your Git credentials.
 
+When GitHub CLI is installed and authenticated, Alfie also reads open pull
+requests for configured github.com remotes using the CLI's existing credentials.
+Alfie does not store a separate GitHub token. Clicking a PR link opens GitHub in
+your default browser.
+
+The **Connect GitHub** flow runs GitHub CLI's browser sign-in. Alfie displays only
+the temporary device code; GitHub CLI handles authorization and credential
+storage. Closing the connection panel cancels a pending sign-in.
+
+Repository account choices store usernames only. For a selected account, Alfie
+reads its token through GitHub CLI and passes it only to the relevant child
+process. Tokens are not sent to the frontend, saved in Alfie's session, or added
+to its command log. Account selection does not switch the CLI's shared default.
+Adding an account temporarily activates it in GitHub CLI; Alfie restores the
+previous default afterward unless another process has changed it in the meantime.
+
 ## Known dependency limitations
 
 The project patches `deepmerge@4.3.1` to reject `__proto__` keys in both merge

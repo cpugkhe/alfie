@@ -9,6 +9,7 @@ import {
   type LogScope,
   type RepoLocal,
   type Prefs,
+  type PullRequest,
   type Ref,
   type RepoStatus,
   type ResolvedProfile,
@@ -87,6 +88,7 @@ export class RepoState {
 
   status = $state<RepoStatus | null>(null);
   refs = $state<Ref[]>([]);
+  pulls = $state<Record<string, PullRequest | undefined>>({});
   stashes = $state<Stash[]>([]);
   commits = $state.raw<Commit[]>([]);
   hasMore = $state(false);
@@ -141,7 +143,7 @@ export class RepoState {
     stash: { collapsed: false, sort: 'recent' },
   });
   /** Favourites and base branches of this repository; owned by the app. */
-  local = $state<RepoLocal>({ favorites: [], bases: {} });
+  local = $state<RepoLocal>({ favorites: [], bases: {}, githubAccount: null });
   /** The branch the current one comes from, and how far behind it we are. */
   base = $state<BaseInfo>({ name: null, target: null, behind: 0, guessed: false });
   /** Shared view settings; owned by the app. */
@@ -174,6 +176,8 @@ export class RepoState {
   private dirty = false;
   private detailToken = 0;
   private diffToken = 0;
+  private pullsLoading: Promise<void> | null = null;
+  private pullsChecked = 0;
 
   constructor(path: string, name: string) {
     this.path = path;
@@ -448,6 +452,7 @@ export class RepoState {
         this.error = null;
       } while (this.dirty);
       this.afterRefresh();
+      void this.refreshPulls();
     } catch (e) {
       this.error = String(e);
     } finally {
@@ -455,6 +460,18 @@ export class RepoState {
       this.busy = false;
       this.loaded = true;
     }
+  }
+
+  async refreshPulls(force = false) {
+    if (force && this.pullsLoading) await this.pullsLoading;
+    if (this.pullsLoading || (!force && Date.now() - this.pullsChecked < 60_000)) return;
+    this.pullsChecked = Date.now();
+    const account = this.local.githubAccount;
+    this.pullsLoading = api.repoPulls(this.path, account)
+      .then((pulls) => { if (this.local.githubAccount === account) this.pulls = pulls; })
+      .catch(() => { if (this.local.githubAccount === account) this.pulls = {}; })
+      .finally(() => { this.pullsLoading = null; });
+    return this.pullsLoading;
   }
 
   private afterRefresh() {

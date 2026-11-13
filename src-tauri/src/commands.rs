@@ -1,6 +1,6 @@
 //! Tauri command surface. Everything here runs off the main thread.
 
-use crate::git::{diff, log, ops, refs, runner, status};
+use crate::git::{diff, log, ops, pulls, refs, runner, status};
 use crate::session;
 use crate::watcher::Watchers;
 use serde::Serialize;
@@ -57,6 +57,26 @@ pub fn repo_status(repo: String) -> Result<status::RepoStatus, String> {
 #[tauri::command(async)]
 pub fn repo_refs(repo: String) -> Result<refs::RefList, String> {
     refs::load(&repo)
+}
+
+#[tauri::command(async)]
+pub fn repo_pulls(repo: String, account: Option<String>) -> Result<std::collections::HashMap<String, pulls::PullRequest>, String> {
+    pulls::load(&repo, account.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn github_status(account: Option<String>) -> crate::github::Connection {
+    crate::github::status(account.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn github_login(login: State<crate::github::Login>, on_code: tauri::ipc::Channel<String>) -> Result<crate::github::Connection, String> {
+    login.start(on_code)
+}
+
+#[tauri::command(async)]
+pub fn github_cancel(login: State<crate::github::Login>) -> Result<(), String> {
+    login.cancel()
 }
 
 #[tauri::command(async)]

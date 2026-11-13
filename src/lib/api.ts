@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type { GraphColumnWidths } from '$lib/graph-columns';
 
 export type Seg = [lane: number, color: number];
@@ -91,6 +91,22 @@ export interface RefList {
   stashes: Stash[];
 }
 
+export interface PullRequest {
+  number: number;
+  url: string;
+}
+
+export type GitHubConnection =
+  | { kind: 'missingCli' }
+  | { kind: 'signedOut'; accounts: GitHubAccount[] }
+  | { kind: 'connected'; login: string; accounts: GitHubAccount[] }
+  | { kind: 'error'; message: string; accounts: GitHubAccount[] };
+
+export interface GitHubAccount {
+  login: string;
+  active: boolean;
+}
+
 export type DiffTarget =
   | { kind: 'commit'; sha: string }
   | { kind: 'stash'; sha: string }
@@ -169,6 +185,8 @@ export type SectionKey = 'favorite' | 'local' | 'remote' | 'tag' | 'stash';
 
 /** Per-repository choices kept by the app (not in git config). */
 export interface RepoLocal {
+  /** GitHub CLI account used for PRs; null follows the CLI default. */
+  githubAccount: string | null;
   /** Full ref names pinned to the top of the sidebar. */
   favorites: string[];
   /** Branch → the branch it was started from. */
@@ -220,6 +238,14 @@ export const api = {
   repoOpen: (path: string) => invoke<RepoInfo>('repo_open', { path }),
   repoStatus: (repo: string) => invoke<RepoStatus>('repo_status', { repo }),
   repoRefs: (repo: string) => invoke<RefList>('repo_refs', { repo }),
+  repoPulls: (repo: string, account: string | null) => invoke<Record<string, PullRequest | undefined>>('repo_pulls', { repo, account }),
+  githubStatus: (account: string | null) => invoke<GitHubConnection>('github_status', { account }),
+  githubLogin: (onCode: (code: string) => void) => {
+    const channel = new Channel<string>();
+    channel.onmessage = onCode;
+    return invoke<GitHubConnection>('github_login', { onCode: channel });
+  },
+  githubCancel: () => invoke<void>('github_cancel'),
   repoLog: (repo: string, limit: number, scope: LogScope, branch: string | null = null) =>
     invoke<LogPage>('repo_log', { repo, limit, scope, branch }),
   commitDetail: (repo: string, sha: string) =>

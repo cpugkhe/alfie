@@ -196,7 +196,7 @@ class App {
       tab.canWrite = () => this.confirmation === null;
       tab.sections = this.sections;
       tab.prefs = this.prefs;
-      if (!this.repoLocal[path]) this.repoLocal[path] = { favorites: [], bases: {} };
+      if (!this.repoLocal[path]) this.repoLocal[path] = { favorites: [], bases: {}, githubAccount: null };
       tab.local = this.repoLocal[path];
       this.pool.set(path, tab);
       api.watchRepo(path).catch(() => {});
@@ -232,7 +232,7 @@ class App {
     if (session?.zoom && session.zoom !== 1) this.setZoom(session.zoom);
     if (session?.prefs) Object.assign(this.prefs, session.prefs);
     for (const [path, local] of Object.entries(session?.repos ?? {})) {
-      this.repoLocal[path] = { favorites: local.favorites ?? [], bases: local.bases ?? {} };
+      this.repoLocal[path] = { favorites: local.favorites ?? [], bases: local.bases ?? {}, githubAccount: local.githubAccount ?? null };
     }
     if (session?.sections) {
       for (const key of Object.keys(this.sections) as (keyof Sections)[]) {

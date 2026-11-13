@@ -1,6 +1,6 @@
 [package]
 name = "alfie"
-version = "0.1.0"
+version = "0.2.0"
 description = "Alfie - a minimal, keyboard-first git GUI"
 authors = ["Alfie contributors"]
 edition = "2024"

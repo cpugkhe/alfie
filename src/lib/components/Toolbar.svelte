@@ -2,12 +2,14 @@
   import type { RepoState } from '$lib/state/repo.svelte';
   import { app } from '$lib/state/app.svelte';
   import { fetch, pull, push, redo, undo, updateFromBase } from '$lib/actions';
+  import PullRequestLink from './PullRequestLink.svelte';
 
   let { repo }: { repo: RepoState } = $props();
 
   const remote = $derived(repo.origin);
 
   const branch = $derived(repo.status?.branch ?? null);
+  const branchPull = $derived(branch ? repo.pulls[`refs/heads/${branch}`] : undefined);
   const undoTop = $derived(repo.undoStack.at(-1));
   const redoTop = $derived(repo.redoStack.at(-1));
   const busy = $derived(!!repo.op || !!app.confirmation);
@@ -41,6 +43,8 @@
       </span>
     {/if}
   </button>
+
+  {#if branchPull}<PullRequestLink pull={branchPull} />{/if}
 
   <span class="sep"></span>
 
@@ -233,13 +237,13 @@
     color: var(--accent);
     font-size: 12px;
   }
-  @container (max-width: 620px) {
+  @container (max-width: 820px) {
     .where,
     .sep {
       display: none;
     }
     .tool {
-      padding: 0 5px;
+      padding: 0 4px;
     }
   }
 </style>

@@ -19,6 +19,10 @@
     repo.sidebarIdx = i;
     const item = repo.sidebar[i];
     if (item.type === 'ref') repo.revealCommit(item.ref.target);
+    if (item.type === 'stash') {
+      app.detailOpen = true;
+      repo.selectStash(item.stash);
+    }
   }
 
   type Header = Extract<SidebarItem, { type: 'header' }>;

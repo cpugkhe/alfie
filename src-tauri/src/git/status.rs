@@ -11,6 +11,7 @@ pub struct FileStatus {
     /// Working tree state: one of `.MADRCU?`
     pub worktree: String,
     pub conflicted: bool,
+    pub submodule: bool,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -94,7 +95,7 @@ pub fn parse(out: &str) -> RepoStatus {
                 // 1 XY sub mH mI mW hH hI path
                 let f: Vec<&str> = tok.splitn(9, ' ').collect();
                 if f.len() == 9 {
-                    st.files.push(entry(f[1], f[8], None, false));
+                    st.files.push(entry(f[1], f[2], f[8], None, false));
                 }
             }
             b'2' => {
@@ -103,14 +104,14 @@ pub fn parse(out: &str) -> RepoStatus {
                 let orig = tokens.next();
                 if f.len() == 10 {
                     st.files
-                        .push(entry(f[1], f[9], orig.map(str::to_string), false));
+                        .push(entry(f[1], f[2], f[9], orig.map(str::to_string), false));
                 }
             }
             b'u' => {
                 // u XY sub m1 m2 m3 mW h1 h2 h3 path
                 let f: Vec<&str> = tok.splitn(11, ' ').collect();
                 if f.len() == 11 {
-                    st.files.push(entry(f[1], f[10], None, true));
+                    st.files.push(entry(f[1], f[2], f[10], None, true));
                 }
             }
             b'?' => {
@@ -121,6 +122,7 @@ pub fn parse(out: &str) -> RepoStatus {
                         index: ".".into(),
                         worktree: "?".into(),
                         conflicted: false,
+                        submodule: false,
                     });
                 }
             }
@@ -130,7 +132,7 @@ pub fn parse(out: &str) -> RepoStatus {
     st
 }
 
-fn entry(xy: &str, path: &str, orig_path: Option<String>, conflicted: bool) -> FileStatus {
+fn entry(xy: &str, sub: &str, path: &str, orig_path: Option<String>, conflicted: bool) -> FileStatus {
     let mut chars = xy.chars();
     FileStatus {
         path: path.to_string(),
@@ -138,6 +140,7 @@ fn entry(xy: &str, path: &str, orig_path: Option<String>, conflicted: bool) -> F
         index: chars.next().unwrap_or('.').to_string(),
         worktree: chars.next().unwrap_or('.').to_string(),
         conflicted,
+        submodule: sub.starts_with('S'),
     }
 }
 
@@ -177,5 +180,17 @@ mod tests {
         let st = parse("# branch.oid (initial)\0# branch.head (detached)\0");
         assert_eq!(st.oid, None);
         assert_eq!(st.branch, None);
+    }
+
+    #[test]
+    fn identifies_submodules_even_when_only_their_contents_are_dirty() {
+        let st = parse(concat!(
+            "1 .M SC.. 160000 160000 160000 aaa aaa module\0",
+            "1 .M S.MU 160000 160000 160000 bbb bbb dirty module\0",
+            "1 M. N... 100644 100644 100644 ccc ddd file.txt\0",
+        ));
+        assert!(st.files[0].submodule);
+        assert!(st.files[1].submodule);
+        assert!(!st.files[2].submodule);
     }
 }

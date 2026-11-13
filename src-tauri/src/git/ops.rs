@@ -66,7 +66,23 @@ pub fn unstage_all(repo: &str) -> Result<(), String> {
 /// Throws away unstaged changes. Untracked files are deleted.
 pub fn discard(repo: &str, tracked: &[String], untracked: &[String]) -> Result<(), String> {
     if !tracked.is_empty() {
+        let index = Git::new(repo).args(["ls-files", "--stage", "-z", "--"]).args(tracked).run()?.stdout;
+        let submodules: Vec<&str> = index.split('\0')
+            .filter(|entry| entry.starts_with("160000 "))
+            .filter_map(|entry| entry.split_once('\t').map(|(_, path)| path))
+            .collect();
+        for path in &submodules {
+            let sub = std::path::Path::new(repo).join(path);
+            if sub.join(".git").exists()
+                && !git(&sub, &["status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"])?.is_empty()
+            {
+                return Err(format!("{path} has local changes inside the submodule. Open that submodule as a repository and commit, stash, or discard them there first."));
+            }
+        }
         done(w(repo).args(["restore", "--worktree", "--"]).args(tracked).run())?;
+        if !submodules.is_empty() {
+            done(w(repo).args(["submodule", "update", "--checkout", "--no-fetch", "--"]).args(submodules).run())?;
+        }
     }
     if !untracked.is_empty() {
         done(w(repo).args(["clean", "-f", "-q", "--"]).args(untracked).run())?;
@@ -83,6 +99,9 @@ pub fn apply_hunk(
     lines: Option<&[usize]>,
     action: &str,
 ) -> Result<(), String> {
+    if super::status::load(repo)?.files.iter().any(|file| file.path == path && file.submodule) {
+        return Err("Submodule changes must be staged or discarded as a whole from the file list.".into());
+    }
     let (target, args): (DiffTarget, &[&str]) = match action {
         "stage" => (DiffTarget::Unstaged, &["--cached"]),
         "unstage" => (DiffTarget::Staged, &["--cached", "--reverse"]),
@@ -364,6 +383,40 @@ pub fn delete_remote_branch(repo: &str, name: &str) -> Result<(), String> {
     done(w(repo).args(["fetch", "-q", "--prune", "--", &remote]).run())
 }
 
+fn auto_stash<T>(repo: &str, destination: &str, switch: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let status = super::status::load(repo)?;
+    if status.branch.as_deref() == Some(destination) {
+        return switch();
+    }
+    if status.state.is_some() || status.files.iter().any(|f| f.conflicted) {
+        return Err("Finish or abort the current operation before switching branches.".into());
+    }
+    // A parent stash cannot save worktree changes inside a submodule.
+    let parent_changes = |status: &super::status::RepoStatus| {
+        status.files.iter().any(|f| !f.submodule || f.index != ".")
+    };
+    if !parent_changes(&status) {
+        return switch();
+    }
+    let source = status.branch.as_deref().unwrap_or("detached HEAD");
+    let message = format!("Alfie auto-stash: {source} → {destination}");
+    let before = git(repo, &["rev-parse", "--verify", "-q", "refs/stash"]).ok();
+    stash_push(repo, Some(&message), true)?;
+    let saved = git(repo, &["rev-parse", "--verify", "-q", "refs/stash"]).ok();
+    let stash = saved.filter(|id| Some(id) != before.as_ref());
+    let result = super::status::load(repo).and_then(|status| {
+        if !parent_changes(&status) {
+            switch()
+        } else {
+            Err("Some project changes could not be stashed.".into())
+        }
+    });
+    result.map_err(|error| match stash {
+        Some(id) => format!("{error}\nYour changes are saved in stash {}. Preview or apply it from Stashes.", id.trim()),
+        None => error,
+    })
+}
+
 /// Returns the local tip needing reset approval, without switching branches.
 /// Approval is tied to that tip; `reset --keep` protects uncommitted work.
 pub fn checkout_remote(repo: &str, name: &str, expected: Option<&str>) -> Result<Option<String>, String> {
@@ -373,7 +426,7 @@ pub fn checkout_remote(repo: &str, name: &str, expected: Option<&str>) -> Result
     done(w(repo).args(["fetch", "-q", "--", &remote, &format!("+refs/heads/{branch}:{remote_ref}")]).run())?;
     let target = git(repo, &["rev-parse", "--verify", &remote_ref])?.trim().to_string();
     if !local_exists(repo, &branch) {
-        done(w(repo).args(["checkout", "-q", "-b", &branch, "--track", &remote_ref, "--"]).run())?;
+        auto_stash(repo, &branch, || done(w(repo).args(["checkout", "-q", "-b", &branch, "--track", &remote_ref, "--"]).run()))?;
         return Ok(None);
     }
     let local_ref = format!("refs/heads/{branch}");
@@ -382,13 +435,16 @@ pub fn checkout_remote(repo: &str, name: &str, expected: Option<&str>) -> Result
     if ahead.trim() != "0" && expected != Some(before.as_str()) {
         return Ok(Some(before));
     }
-    done(w(repo).args(["checkout", "-q", &branch, "--"]).run())?;
-    if ahead.trim() == "0" {
-        done(w(repo).args(["merge", "--ff-only", "-q", &target, "--"]).run())?;
-    } else {
-        reset(repo, &target, "keep")?;
-    }
-    done(w(repo).args(["branch", "--set-upstream-to", &remote_ref, "--", &branch]).run())?;
+    auto_stash(repo, &branch, || {
+        done(w(repo).args(["checkout", "-q", &branch, "--"]).run())?;
+        if ahead.trim() == "0" {
+            done(w(repo).args(["merge", "--ff-only", "-q", &target, "--"]).run())?;
+        } else {
+            reset(repo, &target, "keep")?;
+        }
+        done(w(repo).args(["branch", "--set-upstream-to", &remote_ref, "--", &branch]).run())?;
+        Ok(())
+    })?;
     Ok(None)
 }
 
@@ -403,6 +459,10 @@ fn local_exists(repo: &str, name: &str) -> bool {
 /// `kind`: `local`, `remote` (checks out a tracking branch) or anything else
 /// for a detached checkout of a tag or commit.
 pub fn checkout(repo: &str, target: &str, kind: &str) -> Result<(), String> {
+    if target.starts_with('-') {
+        return Err("Invalid checkout target".into());
+    }
+    git(repo, &["rev-parse", "--verify", "--end-of-options", &format!("{target}^{{commit}}")])?;
     let cmd = match kind {
         "local" => w(repo).args(["checkout", "-q", target, "--"]),
         "remote" => {
@@ -415,7 +475,12 @@ pub fn checkout(repo: &str, target: &str, kind: &str) -> Result<(), String> {
         }
         _ => w(repo).args(["checkout", "-q", "--detach", target, "--"]),
     };
-    done(cmd.run())
+    let destination = match kind {
+        "local" => target.to_string(),
+        "remote" => target.split_once('/').map(|(_, branch)| branch).unwrap_or(target).to_string(),
+        _ => format!("{target} (detached)"),
+    };
+    auto_stash(repo, &destination, || done(cmd.run()))
 }
 
 pub fn create_branch(

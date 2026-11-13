@@ -32,8 +32,8 @@ export const stageAll = (repo: RepoState) => repo.run('Staging…', () => api.st
 export const unstageAll = (repo: RepoState) => repo.run('Unstaging…', () => api.unstageAll(p(repo)));
 
 /** Discards the marked files (or the cursor file). Only unstaged changes can be discarded. */
-export async function discardFile(repo: RepoState) {
-  const all = repo.targets().filter((e) => e.group !== 'commit');
+export async function discardFile(repo: RepoState, entries: FileEntry[] = repo.targets()) {
+  const all = entries.filter((e) => e.group !== 'commit');
   const list = all.filter((e) => e.group === 'unstaged');
   if (!list.length) {
     if (all.length) repo.notify('Unstage first, then discard.', 'error');
@@ -43,6 +43,8 @@ export async function discardFile(repo: RepoState) {
   const tracked = list.filter((e) => e.target.kind !== 'untracked').map((e) => e.path);
   const one = list.length === 1 ? list[0] : null;
   const parts = [
+    list.some((e) => repo.status?.files.some((f) => f.path === e.path && f.submodule))
+      ? 'Submodule checkouts will return to their recorded commits. Local edits inside submodules must be handled in those repositories first.' : '',
     tracked.length ? `Unstaged changes in ${tracked.length === 1 ? tracked[0] : `${tracked.length} files`} will be lost.` : '',
     untracked.length
       ? `${untracked.length === 1 ? untracked[0] : `${untracked.length} untracked files`} will be deleted from disk (git has no copy).`
@@ -113,7 +115,7 @@ export async function hunkAction(repo: RepoState, action: HunkAction) {
   const open = repo.diff;
   if (!open?.data || !open.data.hunks.length) return;
   const kind = open.entry.target.kind;
-  if (kind === 'commit') return;
+  if (kind === 'commit' || kind === 'stash') return;
   if (kind === 'untracked') {
     repo.notify('Untracked file: stage the whole file first (space).', 'error');
     return;
@@ -122,6 +124,11 @@ export async function hunkAction(repo: RepoState, action: HunkAction) {
   if (!wanted || (kind === 'staged' && action === 'discard')) {
     repo.notify(kind === 'staged' ? 'Unstage first, then discard.' : 'Nothing staged here.', 'error');
     return;
+  }
+
+  if (repo.status?.files.some((f) => f.path === open.entry.path && f.submodule)) {
+    if (wanted === 'discard') return discardFile(repo, [open.entry]);
+    return toggleStage(repo, [open.entry], open.entry);
   }
 
   const lines = repo.selectedLines();
@@ -223,7 +230,7 @@ export async function checkoutRef(repo: RepoState, ref: Pick<Ref, 'short' | 'kin
   const confirmReset = async (tip: string) => {
     const ok = await app.confirm({
       title: `Reset local branch to ${ref.short}?`,
-      body: `Local commits missing from ${ref.short} will leave this branch. Uncommitted changes are kept; conflicting changes must be stashed first.`,
+      body: `Local commits missing from ${ref.short} will leave this branch. When switching branches, uncommitted changes are automatically saved in Stashes.`,
       confirmLabel: 'Reset to remote',
       danger: true,
     }, repo);
@@ -242,32 +249,22 @@ export async function checkoutRef(repo: RepoState, ref: Pick<Ref, 'short' | 'kin
     if (changed) throw new Error('The local branch changed while confirming. Try again to review the reset.');
   };
   const from = whereNow(repo);
+  const oldStashes = new Set(repo.stashes.map((s) => s.id));
   const landed = () => {
     if (cancelled) return;
     record(repo, { kind: 'checkout', label: `checkout ${ref.short}`, from, to: whereNow(repo) });
     repo.jumpToHead();
+    const saved = repo.stashes.find((s) => !oldStashes.has(s.id));
+    const kept = repo.status?.files.some((f) => f.submodule);
+    const notices = [
+      saved ? `Project changes saved in ${saved.name}. Preview or apply them from Stashes.` : '',
+      kept ? 'Submodule checkouts were kept. Stash changes inside each submodule separately.' : '',
+    ].filter(Boolean);
+    if (notices.length) repo.notify(notices.join(' '));
   };
   const err = await repo.run(`Checking out ${ref.short}…`, go, { quiet: true });
   if (!err) return landed();
-  if (!/would be overwritten|commit your changes or stash|not uptodate|cannot merge/i.test(err)) {
-    repo.notify(err, 'error');
-    return;
-  }
-  const ok = await app.confirm({
-    title: 'Local changes are in the way',
-    body: `Switching to ${ref.short} would overwrite uncommitted changes. Stash them and switch? They stay in the stash list until you apply them.`,
-    confirmLabel: 'Stash and switch',
-  }, repo);
-  if (!ok) return;
-  const failed = await repo.run(
-    `Checking out ${ref.short}…`,
-    async () => {
-      await api.stashPush(p(repo), `Before switching to ${ref.short}`, true);
-      await go();
-    },
-    { done: 'Changes stashed' },
-  );
-  if (!failed) landed();
+  repo.notify(err, 'error');
 }
 
 export async function newBranch(repo: RepoState, start: string | null = null, name?: string) {
@@ -380,6 +377,7 @@ export async function renameStash(repo: RepoState, stash: Stash) {
 
 export function stashMenu(repo: RepoState, stash: Stash) {
   return [
+    { label: 'Preview', run: () => { app.detailOpen = true; repo.selectStash(stash); } },
     { label: 'Apply', run: () => void applyStash(repo, stash) },
     { label: 'Pop (apply and remove)', run: () => void applyStash(repo, stash, true) },
     { label: 'Edit stash message…', run: () => void renameStash(repo, stash) },
@@ -714,7 +712,7 @@ export async function forcePush(repo: RepoState) {
 
 // ---------- sidebar ----------
 
-/** Enter in the sidebar: check out a branch, show a tag, apply a stash. */
+/** Enter in the sidebar: check out a branch, show a tag or preview a stash. */
 export function activateSidebar(repo: RepoState) {
   const item = repo.sidebar[repo.sidebarIdx];
   if (!item) return;
@@ -723,7 +721,10 @@ export function activateSidebar(repo: RepoState) {
     app.save();
     return;
   }
-  if (item.type === 'stash') return applyStash(repo, item.stash);
+  if (item.type === 'stash') {
+    app.detailOpen = true;
+    return repo.selectStash(item.stash);
+  }
   if (item.ref.kind === 'tag') return repo.revealCommit(item.ref.target);
   if (item.current) return repo.revealCommit(item.ref.target);
   return checkoutRef(repo, item.ref);

@@ -70,6 +70,11 @@ pub fn commit_detail(repo: String, sha: String) -> Result<log::CommitDetail, Str
 }
 
 #[tauri::command(async)]
+pub fn stash_detail(repo: String, sha: String) -> Result<log::CommitDetail, String> {
+    log::stash_detail(&repo, &sha)
+}
+
+#[tauri::command(async)]
 pub fn diff_file(
     repo: String,
     target: diff::DiffTarget,

@@ -194,6 +194,18 @@ pub fn detail(repo: &str, sha: &str) -> Result<CommitDetail, String> {
     })
 }
 
+pub fn stash_detail(repo: &str, sha: &str) -> Result<CommitDetail, String> {
+    let id = git(repo, &["rev-parse", "--verify", "--end-of-options", &format!("{sha}^{{commit}}")])?;
+    let mut detail = detail(repo, id.trim())?;
+    if detail.parents.len() < 2 {
+        return Err("Not a stash commit".into());
+    }
+    if let Some(untracked) = detail.parents.get(2) {
+        detail.files.extend(self::detail(repo, untracked)?.files);
+    }
+    Ok(detail)
+}
+
 pub fn parse_name_status(out: &str) -> Vec<FileChange> {
     let mut tokens = out.split('\0').filter(|t| !t.is_empty());
     let mut files = Vec::new();

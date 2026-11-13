@@ -13,6 +13,11 @@ Named after a tri-colour mini Aussie.
 
 - Stage files, hunks, or selected lines and write commits.
 - Work with branches, tags, stashes, merges, and rebases.
+- Switching branches automatically stashes staged, unstaged, and untracked changes.
+  Select a stash to preview its files and diffs, then use Apply or Pop to restore it.
+  Stashes remain saved until you pop or delete them; returning to a branch does not restore them automatically.
+  Submodule checkouts and edits stay in place when switching branches; stash edits inside each submodule separately.
+  Discarding a submodule restores its recorded commit and refuses to overwrite local work inside it.
 - Fetch, pull, and push using your Git credentials or SSH profiles.
 - Organize repositories into tabs and spaces, with split views.
 - Navigate with keyboard shortcuts and a command palette.

@@ -109,6 +109,7 @@ export class RepoState {
   searchFocus = $state(0);
 
   detail = $state<CommitDetail | null>(null);
+  selectedStash = $state<Stash | null>(null);
   fileIdx = $state(0);
   diff = $state<OpenDiff | null>(null);
   sidebarIdx = $state(1);
@@ -323,7 +324,7 @@ export class RepoState {
       path: f.path,
       origPath: f.origPath,
       status: f.status,
-      target: { kind: 'commit', sha: d.id } as DiffTarget,
+      target: { kind: this.selectedStash ? 'stash' : 'commit', sha: d.id } satisfies DiffTarget,
       group: 'commit' as const,
     }));
   });
@@ -457,8 +458,11 @@ export class RepoState {
   }
 
   private afterRefresh() {
+    if (this.selectedStash) {
+      this.selectedStash = this.stashes.find((s) => s.id === this.selectedStash?.id) ?? null;
+    }
     // Keep the selection if it still exists, else fall back to the top row.
-    if (this.selIndex < 0) {
+    if (this.selIndex < 0 && !this.selectedStash) {
       const first = this.items[0];
       this.selectedId = first ? (first.type === 'wt' ? WT : first.commit.id) : '';
     }
@@ -538,7 +542,7 @@ export class RepoState {
     }
     if (this.detail?.id === id) return;
     try {
-      const detail = await api.commitDetail(this.path, id);
+      const detail = await (this.selectedStash ? api.stashDetail(this.path, id) : api.commitDetail(this.path, id));
       if (token === this.detailToken) {
         this.detail = detail;
         this.fileIdx = 0;
@@ -551,8 +555,10 @@ export class RepoState {
 
   // ---------- selection ----------
 
-  select(id: string, opts: { reveal?: boolean } = {}) {
-    if (this.selectedId !== id) {
+  select(id: string, opts: { reveal?: boolean; stash?: Stash } = {}) {
+    const changed = this.selectedId !== id || !!this.selectedStash !== !!opts.stash;
+    this.selectedStash = opts.stash ?? null;
+    if (changed) {
       this.selectedId = id;
       this.fileIdx = 0;
       if (id === WT && this.diff) this.syncDiff();
@@ -606,7 +612,9 @@ export class RepoState {
   /** Shows the commit of the highlighted branch or tag without leaving the sidebar. */
   private previewSidebar() {
     const item = this.sidebar[this.sidebarIdx];
-    if (item?.type === 'ref' && this.commits.some((c) => c.id === item.ref.target)) {
+    if (item?.type === 'stash') {
+      this.selectStash(item.stash);
+    } else if (item?.type === 'ref' && this.commits.some((c) => c.id === item.ref.target)) {
       this.filter = '';
       this.select(item.ref.target);
     }
@@ -675,6 +683,7 @@ export class RepoState {
         break;
       case 'sidebar':
         this.sidebarIdx = this.nearestSidebarRow(end ? this.sidebar.length - 1 : 0, end ? -1 : 1);
+        this.previewSidebar();
         break;
       case 'files':
         this.selectFile(end ? this.files.length - 1 : 0);
@@ -745,6 +754,11 @@ export class RepoState {
     }
     this.filter = '';
     this.select(sha);
+  }
+
+  selectStash(stash: Stash) {
+    this.select(stash.id, { stash, reveal: false });
+    this.clearMarks();
   }
 
   // ---------- files + diff ----------

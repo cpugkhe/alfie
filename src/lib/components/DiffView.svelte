@@ -48,7 +48,7 @@
     hunkAction(repo, action);
   }
 
-  const TARGET_LABEL = { commit: '', staged: 'staged', unstaged: 'unstaged', untracked: 'untracked' };
+  const TARGET_LABEL = { commit: '', stash: 'stash', staged: 'staged', unstaged: 'unstaged', untracked: 'untracked' };
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

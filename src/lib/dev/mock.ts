@@ -107,8 +107,9 @@ export function install() {
       return { ...f.log, commits: commits.slice(0, limit), hasMore: commits.length > limit };
     },
     commit_detail: ({ sha }) => f.details[sha],
+    stash_detail: ({ sha }) => ({ ...f.details[f.log.commits[0].id], id: sha, message: f.refs.stashes.find((s: any) => s.id === sha)?.message ?? 'Saved changes' }),
     diff_file: ({ target, path }) =>
-      f.diffs[target.kind === 'commit' ? `commit:${target.sha}:${path}` : `${target.kind}:${path}`],
+      f.diffs[target.kind === 'stash' ? `commit:${f.log.commits[0].id}:${path}` : target.kind === 'commit' ? `commit:${target.sha}:${path}` : `${target.kind}:${path}`],
     watch_repo: () => null,
     unwatch_repo: () => null,
     git_log: () => [],

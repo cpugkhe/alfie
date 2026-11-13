@@ -396,14 +396,14 @@ export const commands: Command[] = [
     id: 'branch.newHere',
     title: 'New branch at selected commit…',
     scope: 'repo',
-    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT,
+    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT && !repo()?.selectedStash,
     run: withRepo((r) => act.newBranch(r, r.selectedId)),
   },
   {
     id: 'commit.checkout',
     title: 'Check out selected commit (detached)',
     scope: 'repo',
-    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT,
+    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT && !repo()?.selectedStash,
     run: withRepo((r) => act.checkoutRef(r, { short: r.selectedId, kind: 'tag' })),
   },
   {
@@ -449,7 +449,7 @@ export const commands: Command[] = [
     id,
     title,
     scope: 'repo',
-    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT,
+    when: () => !!repo()?.selectedId && repo()?.selectedId !== WT && !repo()?.selectedStash,
     run: withRepo(fn),
   })),
   ...(['continue', 'skip', 'abort'] as const).map((action): Command => ({

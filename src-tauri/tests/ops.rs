@@ -115,6 +115,84 @@ fn discard_tracked_and_untracked() {
     assert!(!r.0.join("junk.txt").exists());
 }
 
+fn with_submodule() -> (Repo, Repo, String, String) {
+    let source = Repo::new();
+    source.write("file.txt", "base\n");
+    source.commit_all("base module");
+    let base = log::head_oid(source.path()).unwrap();
+    source.write("file.txt", "new commit\n");
+    source.commit_all("new module");
+    let newer = log::head_oid(source.path()).unwrap();
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.sh(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", source.path(), "module"]);
+    r.sh(&["-C", "module", "checkout", "-q", &base]);
+    r.commit_all("parent");
+    r.sh(&["branch", "topic"]);
+    (source, r, base, newer)
+}
+
+#[test]
+fn discard_submodule_commit_restores_the_index_commit() {
+    let (_source, r, base, newer) = with_submodule();
+    r.sh(&["-C", "module", "checkout", "-q", &newer]);
+    ops::discard(r.path(), &s("module"), &[]).unwrap();
+    assert_eq!(r.sh(&["-C", "module", "rev-parse", "HEAD"]).trim(), base);
+    assert!(status::load(r.path()).unwrap().files.is_empty());
+
+    r.sh(&["-C", "module", "checkout", "-q", &newer]);
+    ops::stage(r.path(), &s("module")).unwrap();
+    r.sh(&["-C", "module", "checkout", "-q", &base]);
+    ops::discard(r.path(), &s("module"), &[]).unwrap();
+    assert_eq!(r.sh(&["-C", "module", "rev-parse", "HEAD"]).trim(), newer);
+    assert_eq!(status::load(r.path()).unwrap().files[0].index, "M");
+}
+
+#[test]
+fn discard_submodule_refuses_to_erase_internal_work() {
+    let (_source, r, _base, newer) = with_submodule();
+    r.sh(&["-C", "module", "checkout", "-q", &newer]);
+    r.write("module/file.txt", "staged inside module\n");
+    r.sh(&["-C", "module", "add", "file.txt"]);
+    r.write("module/file.txt", "unstaged inside module\n");
+    r.write("module/new.txt", "untracked inside module\n");
+    r.write("a.txt", "parent work\n");
+    let error = ops::discard(r.path(), &["a.txt".into(), "module".into()], &[]).unwrap_err();
+    assert!(error.contains("module") && error.contains("inside"));
+    assert_eq!(r.read("module/file.txt"), "unstaged inside module\n");
+    assert_eq!(r.sh(&["-C", "module", "show", ":file.txt"]), "staged inside module\n");
+    assert_eq!(r.read("module/new.txt"), "untracked inside module\n");
+    assert_eq!(r.read("a.txt"), "parent work\n");
+    assert_eq!(r.sh(&["-C", "module", "rev-parse", "HEAD"]).trim(), newer);
+}
+
+#[test]
+fn switch_with_submodule_commit_changes_keeps_the_submodule_and_stashes_parent_work() {
+    let (_source, r, _base, newer) = with_submodule();
+    r.sh(&["-C", "module", "checkout", "-q", &newer]);
+    ops::checkout(r.path(), "topic", "local").unwrap();
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("topic"));
+    assert_eq!(r.sh(&["-C", "module", "rev-parse", "HEAD"]).trim(), newer);
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
+
+    r.write("a.txt", "save parent\n");
+    ops::stage(r.path(), &s("a.txt")).unwrap();
+    r.write("new.txt", "untracked parent\n");
+    r.write("module/file.txt", "keep child work\n");
+    r.write("module/child.txt", "untracked child\n");
+    ops::checkout(r.path(), "main", "local").unwrap();
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+    assert_eq!(r.read("a.txt"), "base\n");
+    assert!(!r.0.join("new.txt").exists());
+    assert_eq!(r.read("module/file.txt"), "keep child work\n");
+    assert_eq!(r.read("module/child.txt"), "untracked child\n");
+    let stash = refs::load(r.path()).unwrap().stashes.remove(0);
+    ops::stash(r.path(), &stash.name, "pop").unwrap();
+    assert_eq!(r.read("a.txt"), "save parent\n");
+    assert_eq!(r.read("new.txt"), "untracked parent\n");
+    assert_eq!(r.read("module/file.txt"), "keep child work\n");
+}
+
 const BASE: &str = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\nl16\nl17\nl18\nl19\nl20\n";
 
 #[test]
@@ -323,6 +401,102 @@ fn stash_message_can_be_edited_without_losing_content() {
 
     ops::stash(r.path(), &renamed.name, "pop").unwrap();
     assert_eq!(r.read("a.txt"), "older\n");
+}
+
+#[test]
+fn switching_auto_stashes_and_previews_staged_unstaged_and_untracked_files() {
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.commit_all("init");
+    ops::create_branch(r.path(), "topic", None, false).unwrap();
+    r.write("a.txt", "staged\n");
+    ops::stage_all(r.path()).unwrap();
+    r.write("a.txt", "unstaged\n");
+    r.write("new file.txt", "untracked\n");
+    ops::checkout(r.path(), "topic", "local").unwrap();
+
+    let status = status::load(r.path()).unwrap();
+    assert_eq!(status.branch.as_deref(), Some("topic"));
+    assert!(status.files.is_empty());
+    assert_eq!(r.read("a.txt"), "base\n");
+    assert!(!r.0.join("new file.txt").exists());
+    let stashes = refs::load(r.path()).unwrap().stashes;
+    assert_eq!(stashes.len(), 1);
+    let stash = &stashes[0];
+    assert!(stash.message.contains("Alfie auto-stash: main → topic"));
+    let preview = log::stash_detail(r.path(), &stash.id).unwrap();
+    assert_eq!(preview.files.len(), 2);
+    let target = diff::DiffTarget::Stash { sha: stash.id.clone() };
+    let tracked = diff::load(r.path(), &target, "a.txt", None).unwrap();
+    assert!(tracked.hunks[0].lines.iter().any(|l| l.text == "unstaged" && l.kind == "+"));
+    let untracked = diff::load(r.path(), &target, "new file.txt", None).unwrap();
+    assert_eq!(untracked.added, 1);
+    assert_eq!(untracked.hunks[0].lines[0].text, "untracked");
+    assert!(status::load(r.path()).unwrap().files.is_empty(), "Preview must not apply the stash");
+
+    ops::checkout(r.path(), "main", "local").unwrap();
+    r.sh(&["stash", "apply", "--index", &stash.id]);
+    assert_eq!(r.read("a.txt"), "unstaged\n");
+    assert_eq!(r.sh(&["show", ":a.txt"]), "staged\n");
+    assert_eq!(r.read("new file.txt"), "untracked\n");
+}
+
+#[test]
+fn clean_or_current_branch_checkout_does_not_create_a_stash() {
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.commit_all("init");
+    ops::create_branch(r.path(), "topic", None, false).unwrap();
+    ops::checkout(r.path(), "topic", "local").unwrap();
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
+    r.write("a.txt", "keep here\n");
+    ops::checkout(r.path(), "topic", "local").unwrap();
+    assert_eq!(r.read("a.txt"), "keep here\n");
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
+    assert!(ops::checkout(r.path(), "missing", "local").is_err());
+    assert_eq!(r.read("a.txt"), "keep here\n");
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
+}
+
+#[test]
+fn failed_switch_keeps_auto_stash_recoverable() {
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.commit_all("init");
+    let other = Repo::new();
+    let worktree = other.0.join("linked");
+    r.sh(&["worktree", "add", "-b", "busy", worktree.to_str().unwrap()]);
+    r.write("a.txt", "saved\n");
+    let error = ops::checkout(r.path(), "busy", "local").unwrap_err();
+    assert!(error.contains("Your changes are saved in stash"));
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+    let stashes = refs::load(r.path()).unwrap().stashes;
+    assert_eq!(stashes.len(), 1);
+    ops::stash(r.path(), &stashes[0].name, "pop").unwrap();
+    assert_eq!(r.read("a.txt"), "saved\n");
+}
+
+#[test]
+fn stash_preview_handles_tracked_only_untracked_only_renames_and_binary_files() {
+    let r = Repo::new();
+    r.write("old.txt", "base\n");
+    r.commit_all("init");
+    r.sh(&["mv", "old.txt", "renamed.txt"]);
+    ops::stash_push(r.path(), Some("rename"), false).unwrap();
+    let stash = refs::load(r.path()).unwrap().stashes.remove(0);
+    let detail = log::stash_detail(r.path(), &stash.id).unwrap();
+    assert_eq!(detail.files[0].orig_path.as_deref(), Some("old.txt"));
+    let target = diff::DiffTarget::Stash { sha: stash.id };
+    let diff = diff::load(r.path(), &target, "renamed.txt", Some("old.txt")).unwrap();
+    assert!(diff.header.contains("rename from old.txt"));
+
+    fs::write(r.0.join("binary.bin"), [0, 1, 2, 3]).unwrap();
+    ops::stash_push(r.path(), Some("untracked only"), true).unwrap();
+    let stash = refs::load(r.path()).unwrap().stashes.remove(0);
+    assert_eq!(log::stash_detail(r.path(), &stash.id).unwrap().files[0].path, "binary.bin");
+    assert!(diff::load(r.path(), &diff::DiffTarget::Stash { sha: stash.id }, "binary.bin", None).unwrap().binary);
+    let head = log::head_oid(r.path()).unwrap();
+    assert!(log::stash_detail(r.path(), &head).is_err());
 }
 
 /// main: init, m1 ; topic (from init): t1
@@ -543,6 +717,72 @@ fn remote_checkout_requires_approval_for_ahead_and_diverged_branches() {
     assert_eq!(ops::checkout_remote(r.path(), "origin/main", Some(&local)).unwrap(), None);
     assert_eq!(log::head_oid(r.path()), log::head_oid(origin.path()));
     assert_eq!(r.read("a.txt"), "unsaved\n");
+}
+
+#[test]
+fn remote_switch_stashes_only_after_reset_approval() {
+    let (origin, r) = with_origin();
+    r.write("local.txt", "local\n");
+    r.commit_all("local only");
+    let local = log::head_oid(r.path()).unwrap();
+    ops::create_branch(r.path(), "topic", None, true).unwrap();
+    r.write("a.txt", "staged\n");
+    ops::stage_all(r.path()).unwrap();
+    r.write("a.txt", "unsaved\n");
+    r.write("untracked.txt", "new\n");
+    origin.write("a.txt", "remote edit\n");
+    origin.commit_all("remote only");
+
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", None).unwrap(), Some(local.clone()));
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("topic"));
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
+    assert_eq!(r.read("a.txt"), "unsaved\n");
+
+    assert_eq!(ops::checkout_remote(r.path(), "origin/main", Some(&local)).unwrap(), None);
+    assert_eq!(status::load(r.path()).unwrap().branch.as_deref(), Some("main"));
+    assert_eq!(r.read("a.txt"), "remote edit\n");
+    assert!(status::load(r.path()).unwrap().files.is_empty());
+    let stash = refs::load(r.path()).unwrap().stashes.remove(0);
+    assert!(stash.message.contains("topic → main"));
+    ops::checkout(r.path(), "topic", "local").unwrap();
+    ops::stash(r.path(), &stash.name, "pop").unwrap();
+    assert_eq!(r.read("a.txt"), "unsaved\n");
+    assert_eq!(r.read("untracked.txt"), "new\n");
+}
+
+#[test]
+fn remote_switch_to_new_tracking_branch_stashes_untracked_files() {
+    let (origin, r) = with_origin();
+    ops::create_branch(origin.path(), "feature/new", None, true).unwrap();
+    origin.write("new.txt", "remote\n");
+    origin.commit_all("new branch");
+    ops::fetch(r.path()).unwrap();
+    r.write("new.txt", "local untracked\n");
+    ops::checkout_remote(r.path(), "origin/feature/new", None).unwrap();
+    assert_eq!(r.read("new.txt"), "remote\n");
+    assert!(status::load(r.path()).unwrap().files.is_empty());
+    let stash = refs::load(r.path()).unwrap().stashes.remove(0);
+    let diff = diff::load(r.path(), &diff::DiffTarget::Stash { sha: stash.id }, "new.txt", None).unwrap();
+    assert_eq!(diff.hunks[0].lines[0].text, "local untracked");
+}
+
+#[test]
+fn switching_with_conflicts_leaves_the_operation_and_files_alone() {
+    let r = Repo::new();
+    r.write("a.txt", "base\n");
+    r.commit_all("base");
+    ops::create_branch(r.path(), "topic", None, true).unwrap();
+    r.write("a.txt", "topic\n");
+    r.commit_all("topic");
+    ops::checkout(r.path(), "main", "local").unwrap();
+    r.write("a.txt", "main\n");
+    r.commit_all("main");
+    assert!(ops::merge(r.path(), "topic").is_err());
+    let conflicted = r.read("a.txt");
+    assert!(ops::checkout(r.path(), "topic", "local").unwrap_err().contains("Finish or abort"));
+    assert_eq!(r.read("a.txt"), conflicted);
+    assert_eq!(status::load(r.path()).unwrap().state.as_deref(), Some("merge"));
+    assert!(refs::load(r.path()).unwrap().stashes.is_empty());
 }
 
 #[test]

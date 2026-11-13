@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { WT, type FileEntry, type RepoState } from '$lib/state/repo.svelte';
   import { fullTime, splitPath, clamp } from '$lib/util';
-  import { commit, discardFile, stageAll, toggleAmend, toggleStage, unstageAll } from '$lib/actions';
+  import { applyStash, commit, discardFile, stageAll, toggleAmend, toggleStage, unstageAll } from '$lib/actions';
   import { app } from '$lib/state/app.svelte';
 
   let { repo }: { repo: RepoState } = $props();
@@ -10,7 +10,7 @@
 
   const isWt = $derived(repo.selectedId === WT);
   const detail = $derived(repo.detail?.id === repo.selectedId ? repo.detail : null);
-  const subject = $derived(detail?.message.split('\n')[0] ?? '');
+  const subject = $derived(repo.selectedStash?.message ?? detail?.message.split('\n')[0] ?? '');
   const body = $derived(detail?.message.split('\n').slice(1).join('\n').trim() ?? '');
 
   let msgEl = $state<HTMLTextAreaElement>();
@@ -111,6 +111,14 @@
     </div>
   {:else if detail}
     <div class="head">
+      {#if repo.selectedStash}
+        {@const stash = repo.selectedStash}
+        <div class="compose-row">
+          <span class="faint grow">{stash.name} · Preview</span>
+          <button class="mini" disabled={!!repo.op} onclick={() => applyStash(repo, stash)}>Apply</button>
+          <button class="mini" disabled={!!repo.op} onclick={() => applyStash(repo, stash, true)}>Pop</button>
+        </div>
+      {/if}
       <div class="title selectable">{subject}</div>
       {#if body}<pre class="body selectable">{body}</pre>{/if}
       <div class="meta">
@@ -118,9 +126,9 @@
         <span class="truncate selectable" title={detail.email}>{detail.author}</span>
         <span class="faint">Date</span>
         <span>{fullTime(detail.time)}</span>
-        <span class="faint">Commit</span>
+        <span class="faint">{repo.selectedStash ? 'Stash' : 'Commit'}</span>
         <span class="mono selectable">{detail.id.slice(0, 12)}</span>
-        {#if detail.parents.length}
+        {#if detail.parents.length && !repo.selectedStash}
           <span class="faint">{detail.parents.length > 1 ? 'Parents' : 'Parent'}</span>
           <span class="parents">
             {#each detail.parents as p}
@@ -242,6 +250,8 @@
     {/if}
     {#if isWt && repo.fileTotal === 0}
       <div class="none faint">Working tree clean</div>
+    {:else if detail && repo.selectedStash && repo.fileTotal === 0}
+      <div class="none faint">No files in this stash</div>
     {/if}
   </div>
   {#if isWt && repo.marks.length}

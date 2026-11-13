@@ -52,6 +52,7 @@ export interface FileStatus {
   index: string;
   worktree: string;
   conflicted: boolean;
+  submodule: boolean;
 }
 
 export interface RepoStatus {
@@ -92,6 +93,7 @@ export interface RefList {
 
 export type DiffTarget =
   | { kind: 'commit'; sha: string }
+  | { kind: 'stash'; sha: string }
   | { kind: 'unstaged' }
   | { kind: 'staged' }
   | { kind: 'untracked' };
@@ -222,6 +224,8 @@ export const api = {
     invoke<LogPage>('repo_log', { repo, limit, scope, branch }),
   commitDetail: (repo: string, sha: string) =>
     invoke<CommitDetail>('commit_detail', { repo, sha }),
+  stashDetail: (repo: string, sha: string) =>
+    invoke<CommitDetail>('stash_detail', { repo, sha }),
   diffFile: (repo: string, target: DiffTarget, path: string, origPath: string | null) =>
     invoke<FileDiff>('diff_file', { repo, target, path, origPath }),
   watchRepo: (repo: string) => invoke<void>('watch_repo', { repo }),

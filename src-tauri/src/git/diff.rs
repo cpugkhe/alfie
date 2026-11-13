@@ -9,6 +9,7 @@ const MAX_LINES: usize = 8000;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum DiffTarget {
     Commit { sha: String },
+    Stash { sha: String },
     Unstaged,
     Staged,
     Untracked,
@@ -57,6 +58,17 @@ pub fn load(
     match target {
         DiffTarget::Commit { sha } => {
             cmd = cmd.arg(diff_base(repo, sha)).arg(sha.as_str());
+        }
+        DiffTarget::Stash { sha } => {
+            let detail = super::log::stash_detail(repo, sha)?;
+            let untracked = detail.parents.get(2).filter(|parent| {
+                super::runner::git(repo, &["cat-file", "-e", &format!("{parent}:{path}")]).is_ok()
+            });
+            cmd = if let Some(parent) = untracked {
+                cmd.arg(super::log::EMPTY_TREE).arg(parent.as_str())
+            } else {
+                cmd.arg(detail.parents[0].as_str()).arg(detail.id.as_str())
+            };
         }
         DiffTarget::Unstaged => {}
         DiffTarget::Staged => cmd = cmd.arg("--cached"),

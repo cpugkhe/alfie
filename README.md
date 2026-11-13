@@ -48,8 +48,28 @@ Alfie has been tested on those platforms.
 
 ## Install the desktop app
 
-Build from source on your Mac. This project does not currently provide a
-verified, signed installer or an automatic update channel.
+### Download for macOS
+
+Download [Alfie 0.1.0 for Apple Silicon](https://github.com/cpugkhe/alfie/releases/download/v0.1.0/Alfie_0.1.0_aarch64.dmg)
+from [GitHub Releases](https://github.com/cpugkhe/alfie/releases/latest).
+
+1. Open the downloaded `.dmg` file.
+2. Drag **Alfie** to **Applications**.
+3. Eject the disk image and open **Alfie** from Applications.
+
+This build is for Apple Silicon Macs. Git must be installed and available on
+your `PATH`. Node.js, pnpm, and Rust are not needed to run the downloaded app.
+If Git is missing, run `xcode-select --install` to install Apple's command-line tools.
+
+The app is ad-hoc signed and is **not notarized by Apple**. If macOS blocks it,
+follow Apple's [instructions for opening an app from an unidentified developer](https://support.apple.com/en-us/102445).
+Only use **System Settings → Privacy & Security → Open Anyway** if you trust
+the download. There is no automatic update channel; download future versions
+from GitHub Releases.
+
+### Build from source
+
+To build the app yourself, follow the steps below on your Mac.
 
 ### 1. Install the prerequisites
 

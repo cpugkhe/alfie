@@ -45,12 +45,18 @@ Browser demo fixtures live in `src/lib/dev/`.
 
 ## Validate your change
 
+The `CI` workflow runs all frontend tests, frontend type-checking, all Rust
+test targets and documentation tests, and a desktop app build on macOS 15.
+It runs for pull requests to `main` and pushes to `main`. Its check name is
+`macOS tests and build`.
+
 Run these commands from the repository root:
 
 ```sh
 pnpm test
 pnpm check
-cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
+cargo test --manifest-path src-tauri/Cargo.toml --locked --doc
 pnpm build
 ```
 

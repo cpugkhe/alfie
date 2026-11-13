@@ -1,6 +1,8 @@
 .DS_Store
 node_modules
 .pnpm-store
+/.playwright-cli/
+/output/playwright/
 /build
 /.svelte-kit
 /package

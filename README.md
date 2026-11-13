@@ -17,6 +17,23 @@ Named after a tri-colour mini Aussie.
 - Organize repositories into tabs and spaces, with split views.
 - Navigate with keyboard shortcuts and a command palette.
 
+## Screenshots
+
+Captured from the browser demo with synthetic repository data. The desktop app
+uses the same interface, with native macOS window controls.
+
+### Commit graph and repository navigation
+
+![Alfie demo showing branch history, the commit graph, and selected commit details](docs/screenshots/demo-overview.png)
+
+### File diffs
+
+![Alfie demo showing a file diff with an added line and commit metadata](docs/screenshots/demo-diff.png)
+
+### Command palette
+
+![Alfie demo showing the command palette and keyboard shortcuts](docs/screenshots/demo-command-palette.png)
+
 ## Supported operating systems
 
 | Platform | Current status |

@@ -27,7 +27,12 @@
     </span>
   </span>
 
-  <button class="branch" title="Current branch — click to switch (⌘B)" onclick={() => (app.palette = 'branches')}>
+  <button
+    class="branch"
+    disabled={busy}
+    title={repo.op ? `${repo.op} Wait for this operation to finish before switching branches.` : 'Current branch — click to switch (⌘B)'}
+    onclick={() => (app.palette = 'branches')}
+  >
     <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M5 3.5a1.5 1.5 0 1 1-2 1.41V11.1a1.5 1.5 0 1 1-1 0V4.9A1.5 1.5 0 0 1 5 3.5Zm6 0a1.5 1.5 0 0 1 .5 2.91V7.5A2.5 2.5 0 0 1 9 10H6.5v1.09a1.5 1.5 0 1 1-1 0V9h3.5A1.5 1.5 0 0 0 10.5 7.5V6.41A1.5 1.5 0 0 1 11 3.5Z"
@@ -95,7 +100,7 @@
   {/if}
 
   <span class="spacer"></span>
-  {#if repo.op}<span class="op truncate">{repo.op}</span>{/if}
+  <span class="op truncate" role="status">{repo.op ? `${repo.op} · Please wait` : ''}</span>
 </div>
 
 <style>
@@ -161,7 +166,7 @@
     font-weight: 600;
     flex: 0 1 auto;
   }
-  .branch:hover {
+  .branch:hover:not(:disabled) {
     background: color-mix(in srgb, var(--lane-0) 24%, transparent);
   }
   .branch svg {
@@ -195,7 +200,8 @@
     background: var(--hover);
     color: var(--text);
   }
-  .tool:disabled {
+  .tool:disabled,
+  .branch:disabled {
     opacity: 0.38;
   }
   .ico {

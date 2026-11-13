@@ -56,7 +56,7 @@ Alfie has been tested on those platforms.
 
 ### Download for macOS
 
-Download [Alfie 0.2.0 for Apple Silicon](https://github.com/cpugkhe/alfie/releases/download/v0.2.0/Alfie_0.2.0_aarch64.dmg)
+Download [Alfie 0.2.1 for Apple Silicon](https://github.com/cpugkhe/alfie/releases/download/v0.2.1/Alfie_0.2.1_aarch64.dmg)
 from [GitHub Releases](https://github.com/cpugkhe/alfie/releases/latest).
 
 1. Open the downloaded `.dmg` file.

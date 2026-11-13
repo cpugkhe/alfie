@@ -3,6 +3,7 @@
   import { formatKeys } from '$lib/keys/keymap';
 
   let barEl = $state<HTMLDivElement>();
+  const operation = $derived(app.active?.op ?? null);
   /** A drag just ended; swallow the click that follows it. */
   let justDragged = false;
 
@@ -108,10 +109,18 @@
     {/if}
     <button class="add" title="New tab ({formatKeys('mod+t')})" onclick={() => app.newTab()}>+</button>
   </div>
+  <div
+    class="progress"
+    class:running={!!operation}
+    role="progressbar"
+    aria-label={operation ? `${operation} Wait for this Git operation to finish before starting another.` : 'Git operation'}
+    aria-hidden={!operation}
+  ></div>
 </div>
 
 <style>
   .bar {
+    position: relative;
     height: var(--tabbar);
     flex: none;
     display: flex;
@@ -121,6 +130,44 @@
     padding-right: 10px;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
+  }
+  .progress {
+    position: absolute;
+    z-index: 1;
+    inset: auto 0 -1px;
+    height: 2px;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--accent-dim);
+    opacity: 0;
+    transition: opacity 160ms ease;
+  }
+  .progress.running {
+    opacity: 1;
+    transition-duration: 0ms;
+  }
+  .progress::after {
+    content: '';
+    display: block;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent) 45%, var(--accent-hover) 75%, transparent);
+    animation: progress 1.2s linear infinite;
+    animation-play-state: paused;
+  }
+  .progress.running::after {
+    animation-play-state: running;
+  }
+  @keyframes progress {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(250%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress::after {
+      width: 100%;
+      background: var(--accent);
+      animation: none;
+    }
   }
   .tabs {
     display: flex;
